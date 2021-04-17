@@ -36,14 +36,14 @@ SITES_DATA = 'sites_data.csv'
 """
 Heptatets (derivative, I know)
 site (url): url of website
+time: utc in iso format. `str(datetime.utcnow().isoformat())`
 ip: ip address of site/url
-time: utc in iso format. `str(datetime.utcnow().isoformat())`. To convert back, do `datetime.fromisoformat(...)`
 hop_num: the hop from host, use `.distance` attribute when using icmplib. 0 if pinging
 min_rtt: use `.min_rtt` attribute when using icmplib
 avg_rtt: use `.avg_rtt` attribute when using icmplib
 max_rtt: use `.max_rtt` attribute when using icmplib
 """
-DATA_COLUMNS = HEPTATE_ENTRIES # ['site', 'ip', 'time', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
+DATA_COLUMNS = HEPTATE_ENTRIES # ['site', 'time', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
 
 def main():
     # ######################################################## #
@@ -122,10 +122,11 @@ def trace_url(address: str) -> list[Heptate]:
         # last hop of traceroute not in DNS address record
         # traceroute might've timed out or DNS is out of date
         # regardless, something is wrong
+        print(_warn(f'{address} ip mismatch: {hops[-1].address} not one of {possible_ips}'))
         return []
     return [Heptate(address,
-                    h.address,
                     __time_now(),
+                    h.address,
                     h.distance,
                     h.min_rtt,
                     h.avg_rtt,
@@ -135,10 +136,11 @@ def ping_url(address: str):
     _, _, possible_ips = gethostbyname_ex(address)
     host = ping(address)
     if host.address not in possible_ips:
+        print(_warn(f'{address} ip mismatch: {host.address} not one of {possible_ips}'))
         return None
     return Heptate(address,
-                   host.address,
                    __time_now(),
+                   host.address,
                    0,
                    host.min_rtt,
                    host.avg_rtt,
