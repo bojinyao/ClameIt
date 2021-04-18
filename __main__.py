@@ -163,11 +163,11 @@ def _collect_data(data_file: Path, sites_list: list[str]):
         s = perf_counter()
         new_data.extend(trace_url(address))
         e = perf_counter()
-        print(_debug(f'{e - s} seconds'))
+        print(_debug(f'{round(e - s, 2)} seconds'))
     pd.DataFrame(data=new_data).to_csv(
         data_file, index=False, mode='a', header=False)
     end = perf_counter()
-    print(_info(f'Done in {end - start} seconds'))
+    print(_info(f'Done in {round(end - start, 2)} seconds'))
 
 
 # ---------------------------------------------------------------------------- #
