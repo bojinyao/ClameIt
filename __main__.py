@@ -11,6 +11,7 @@ from icmplib import ping, multiping, traceroute, Host, Hop, ICMPSocketError
 from argparse import ArgumentParser
 from pathlib import Path
 from datetime import datetime
+from time import perf_counter
 
 """
 When doing traceroute, check if the last hop ip is one of
@@ -46,6 +47,14 @@ max_rtt: use `.max_rtt` attribute when using icmplib
 DATA_COLUMNS = HEPTATE_ENTRIES # ['site', 'time', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
 
 def main():
+    # parser = ArgumentParser()
+    # subparser = parser.add_subparsers()
+    
+    # # Create parser for the "collect" sub-command
+    # parser_collect = subparser.add_parser('collect')
+    # parser_collect.add_argument('set', choices=['popular', 'sites'], required=True)
+    # parser.parse_args()
+    
     # ######################################################## #
     # ################### Setting Up Files ################### #
     # ######################################################## #
@@ -76,6 +85,14 @@ def main():
         sites_data_file.touch(exist_ok=False)
         print(_info(f'Created {sites_data_file} file'))
 
+    # write in csv headers for empty file
+    if popular_sites_data_file.stat().st_size == 0:
+        pd.DataFrame(columns=DATA_COLUMNS).to_csv(popular_sites_data_file, index=False)
+        
+    # write in csv headers for empty file
+    if sites_data_file.stat().st_size == 0:
+        pd.DataFrame(columns=DATA_COLUMNS).to_csv(sites_data_file, index=False)
+
     # ######################################################## #
     # ##################### Read in files #################### #
     # ######################################################## #
@@ -85,33 +102,32 @@ def main():
     sites_list: list[str] = list(pd.read_csv(sites, squeeze=True))
     print(_debug(sites_list))
     
-    
-    if popular_sites_data_file.stat().st_size == 0: # empty file
-        pd.DataFrame(columns=DATA_COLUMNS).to_csv(popular_sites_data_file, index=False)
     popular_sites_data_df = pd.read_csv(popular_sites_data_file)
-        
-    # dataframe will be read as a list of Heptatet
-    popular_sites_data_list: list[Heptate] = list(popular_sites_data_df.itertuples(index=False, name='Heptatet'))
-    print(_debug(popular_sites_data_list))
     
-    if sites_data_file.stat().st_size == 0: # empty file
-        pd.DataFrame(columns=DATA_COLUMNS).to_csv(sites_data_file, index=False)
     sites_data_df = pd.read_csv(sites_data_file)
         
-    # dataframe will be read as a list of Heptatet
+    # list of Heptatet from popular sites data
+    popular_sites_data_list: list[Heptate] = list(popular_sites_data_df.itertuples(index=False, name='Heptatet'))
+    
+    # list of Heptatet from sites data
     sites_data_list: list[Heptate] = list(sites_data_df.itertuples(index=False, name='Heptatet'))
     print(_debug(sites_data_list))
 
     print('===========================')
+    _collect_data(popular_sites_data_file, popular_sites_list)
+    
+
+def _collect_data(data_file: Path, sites_list: list[str]):
+    print(_info(f'Start collecting on {sites_list}, save to {data_file}'))
+    start = perf_counter()
     new_data = []
-    for address in popular_sites_list:
+    for address in sites_list:
         print(_debug(address))
         new_data.extend(trace_url(address))
-    
-    print(_debug(new_data))
-    pd.DataFrame(data=new_data).to_csv(popular_sites_data_file, index=False, mode='a', header=False)
-    
-        
+    pd.DataFrame(data=new_data).to_csv(data_file, index=False, mode='a', header=False)
+    end = perf_counter()
+    print(_info(f'Done in {end - start} seconds'))
+
 
 def trace_url(address: str) -> list[Heptate]:
     _, _, possible_ips = gethostbyname_ex(address)
