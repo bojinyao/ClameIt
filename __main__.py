@@ -1,3 +1,6 @@
+from util.heptatet import Heptate, HEPTATE_ENTRIES
+from util.logging_color import _info, _warn, _error, _debug
+from socket import gethostbyname_ex
 import pandas as pd
 
 """
@@ -17,10 +20,7 @@ from time import perf_counter
 When doing traceroute, check if the last hop ip is one of
 ip(s) returned by gethostbyname_ex to make sure traceroute didn't timeout
 """
-from socket import gethostbyname_ex
 
-from util.logging_color import _info, _warn, _error, _debug
-from util.heptatet import Heptate, HEPTATE_ENTRIES
 
 # Required file to read from
 POPULAR_SITES = 'popular_us_sites.csv'
@@ -44,17 +44,10 @@ min_rtt: use `.min_rtt` attribute when using icmplib
 avg_rtt: use `.avg_rtt` attribute when using icmplib
 max_rtt: use `.max_rtt` attribute when using icmplib
 """
-DATA_COLUMNS = HEPTATE_ENTRIES # ['site', 'time', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
+DATA_COLUMNS = HEPTATE_ENTRIES  # ['site', 'time', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
+
 
 def main():
-    # parser = ArgumentParser()
-    # subparser = parser.add_subparsers()
-    
-    # # Create parser for the "collect" sub-command
-    # parser_collect = subparser.add_parser('collect')
-    # parser_collect.add_argument('set', choices=['popular', 'sites'], required=True)
-    # parser.parse_args()
-    
     # ######################################################## #
     # ################### Setting Up Files ################### #
     # ######################################################## #
@@ -63,12 +56,12 @@ def main():
     if not popular_sites.exists():
         print(_error(f'{POPULAR_SITES} does not exist and is needed'))
         exit(1)
-    
+
     sites = Path(SITES)
     if not sites.exists():
         print(_error(f'{SITES} does not exist and is needed'))
         exit(1)
-    
+
     # Setting up data files if doesn't exist
     data_dir = Path(DATA_DIR_PATH)
     if not data_dir.exists():
@@ -87,8 +80,9 @@ def main():
 
     # write in csv headers for empty file
     if popular_sites_data_file.stat().st_size == 0:
-        pd.DataFrame(columns=DATA_COLUMNS).to_csv(popular_sites_data_file, index=False)
-        
+        pd.DataFrame(columns=DATA_COLUMNS).to_csv(
+            popular_sites_data_file, index=False)
+
     # write in csv headers for empty file
     if sites_data_file.stat().st_size == 0:
         pd.DataFrame(columns=DATA_COLUMNS).to_csv(sites_data_file, index=False)
@@ -96,38 +90,80 @@ def main():
     # ######################################################## #
     # ##################### Read in files #################### #
     # ######################################################## #
-    popular_sites_list: list[str] = list(pd.read_csv(popular_sites, squeeze=True))
-    print(_debug(popular_sites_list))
-    
-    sites_list: list[str] = list(pd.read_csv(sites, squeeze=True))
-    print(_debug(sites_list))
-    
-    popular_sites_data_df = pd.read_csv(popular_sites_data_file)
-    
-    sites_data_df = pd.read_csv(sites_data_file)
-        
-    # list of Heptatet from popular sites data
-    popular_sites_data_list: list[Heptate] = list(popular_sites_data_df.itertuples(index=False, name='Heptatet'))
-    
-    # list of Heptatet from sites data
-    sites_data_list: list[Heptate] = list(sites_data_df.itertuples(index=False, name='Heptatet'))
-    print(_debug(sites_data_list))
+    popular_sites_list: list[str] = list(
+        pd.read_csv(popular_sites, squeeze=True))
 
-    print('===========================')
-    _collect_data(popular_sites_data_file, popular_sites_list)
-    
+    sites_list: list[str] = list(pd.read_csv(sites, squeeze=True))
+
+    # ######################################################## #
+    # #################### Parse Arguments ################### #
+    # ######################################################## #
+    parser = ArgumentParser()
+    subparser = parser.add_subparsers()
+
+    # Create parser for the "collect" sub-command
+    parser_collect = subparser.add_parser('collect')
+    parser_collect.add_argument('set', choices=['popular', 'sites'])
+    parser_collect.set_defaults(func=lambda args: _handle_collect(args,
+                                                                  popular_sites_data_file,
+                                                                  popular_sites_list,
+                                                                  sites_data_file,
+                                                                  sites_list))
+
+    parser_analyze = subparser.add_parser('analyze')
+    # at least 1 site should be supplied for analysis
+    parser_analyze.add_argument('site', nargs='+')
+    parser_analyze.set_defaults(func=lambda args: _handle_analyze(args,
+                                                                  popular_sites_data_file,
+                                                                  popular_sites_list,
+                                                                  sites_data_file,
+                                                                  sites_list))
+
+    args = parser.parse_args()
+    args.func(args)
+
+# ---------------------------------------------------------------------------- #
+# --------------------------- Sub-command Handlers --------------------------- #
+# ---------------------------------------------------------------------------- #
+
+
+def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: list[str],
+                    sites_data_file: Path, sites_list: list[str]):
+    popular_sites_data_df = pd.read_csv(popular_sites_data_file)
+
+    sites_data_df = pd.read_csv(sites_data_file)
+    print(_debug(f'{args.site}'))
+    # TODO: analysis logic
+
+
+def _handle_collect(args, popular_sites_data_file: Path, popular_sites_list: list[str],
+                    sites_data_file: Path, sites_list: list[str]):
+    if args.set == 'popular':
+        _collect_data(popular_sites_data_file, popular_sites_list)
+    else:  # 'sites'
+        _collect_data(sites_data_file, sites_list)
+
 
 def _collect_data(data_file: Path, sites_list: list[str]):
-    print(_info(f'Start collecting on {sites_list}, save to {data_file}'))
+    print(
+        _info(f'Start collecting on {pformat(sites_list)}, save to {data_file}'))
     start = perf_counter()
     new_data = []
     for address in sites_list:
-        print(_debug(address))
+        print(_debug(address), end=' ')
+        s = perf_counter()
         new_data.extend(trace_url(address))
-    pd.DataFrame(data=new_data).to_csv(data_file, index=False, mode='a', header=False)
+        e = perf_counter()
+        print(_debug(f'{e - s} seconds'))
+    pd.DataFrame(data=new_data).to_csv(
+        data_file, index=False, mode='a', header=False)
     end = perf_counter()
     print(_info(f'Done in {end - start} seconds'))
 
+
+# ---------------------------------------------------------------------------- #
+# ------------------------------ Help Functions ------------------------------ #
+# ---------------------------------------------------------------------------- #
 
 def trace_url(address: str) -> list[Heptate]:
     _, _, possible_ips = gethostbyname_ex(address)
@@ -136,7 +172,8 @@ def trace_url(address: str) -> list[Heptate]:
         # last hop of traceroute not in DNS address record
         # traceroute might've timed out or DNS is out of date
         # regardless, something is wrong
-        print(_warn(f'{address} ip mismatch: {hops[-1].address} not one of {possible_ips}'))
+        print(
+            _warn(f'{address} ip mismatch: {hops[-1].address} not one of {possible_ips}'))
         return []
     return [Heptate(address,
                     __time_now(),
@@ -146,11 +183,13 @@ def trace_url(address: str) -> list[Heptate]:
                     h.avg_rtt,
                     h.max_rtt) for h in hops]
 
+
 def ping_url(address: str):
     _, _, possible_ips = gethostbyname_ex(address)
     host = ping(address)
     if host.address not in possible_ips:
-        print(_warn(f'{address} ip mismatch: {host.address} not one of {possible_ips}'))
+        print(
+            _warn(f'{address} ip mismatch: {host.address} not one of {possible_ips}'))
         return None
     return Heptate(address,
                    __time_now(),
@@ -160,9 +199,11 @@ def ping_url(address: str):
                    host.avg_rtt,
                    host.max_rtt)
 
+
 def __time_now():
+    # use .fromisoformat(str) to convert string back to datetime obj
     return str(datetime.utcnow().isoformat())
+
 
 if __name__ == '__main__':
     main()
-    
