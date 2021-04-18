@@ -87,31 +87,29 @@ def main():
     
     
     if popular_sites_data_file.stat().st_size == 0: # empty file
-        popular_sites_data_df = pd.DataFrame(columns=DATA_COLUMNS)
-    else:
-        popular_sites_data_df = pd.read_csv(popular_sites_data_file)
+        pd.DataFrame(columns=DATA_COLUMNS).to_csv(popular_sites_data_file, index=False)
+    popular_sites_data_df = pd.read_csv(popular_sites_data_file)
         
     # dataframe will be read as a list of Heptatet
     popular_sites_data_list: list[Heptate] = list(popular_sites_data_df.itertuples(index=False, name='Heptatet'))
     print(_debug(popular_sites_data_list))
     
     if sites_data_file.stat().st_size == 0: # empty file
-        sites_data_df = pd.DataFrame(columns=DATA_COLUMNS)
-    else:
-        sites_data_df = pd.read_csv(sites_data_file)
+        pd.DataFrame(columns=DATA_COLUMNS).to_csv(sites_data_file, index=False)
+    sites_data_df = pd.read_csv(sites_data_file)
         
     # dataframe will be read as a list of Heptatet
     sites_data_list: list[Heptate] = list(sites_data_df.itertuples(index=False, name='Heptatet'))
     print(_debug(sites_data_list))
 
     print('===========================')
+    new_data = []
     for address in popular_sites_list:
         print(_debug(address))
-        popular_sites_data_list.extend(trace_url(address))
+        new_data.extend(trace_url(address))
     
-    print(_debug(popular_sites_data_list))
-    popular_sites_data_df = pd.DataFrame(data=popular_sites_data_list)
-    popular_sites_data_df.to_csv(popular_sites_data_file, index=False)
+    print(_debug(new_data))
+    pd.DataFrame(data=new_data).to_csv(popular_sites_data_file, index=False, mode='a', header=False)
     
         
 
