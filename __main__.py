@@ -30,6 +30,9 @@ POPULAR_SITES_DATA = 'popular_sites_data.csv'
 # data on (frequently) visited sites
 SITES_DATA = 'sites_data.csv'
 
+# Perform 5 pings per traceroute/ping for data collection
+NUM_PINGS = 5
+
 """
 Heptatets (derivative, I know)
 site (url): url of website
@@ -183,7 +186,7 @@ and ping is pinging the right ip
 
 def trace_url(address: str) -> list[Heptate]:
     _, _, possible_ips = gethostbyname_ex(address)
-    hops: list[Hop] = traceroute(address)
+    hops: list[Hop] = traceroute(address, count=NUM_PINGS)
     if hops[-1].address not in possible_ips:
         # last hop of traceroute not in DNS address record
         # traceroute might've timed out or DNS is out of date
@@ -202,7 +205,7 @@ def trace_url(address: str) -> list[Heptate]:
 
 def ping_url(address: str):
     _, _, possible_ips = gethostbyname_ex(address)
-    host = ping(address)
+    host = ping(address, count=NUM_PINGS)
     if host.address not in possible_ips:
         # last hop of traceroute not in DNS address record
         # traceroute might've timed out or DNS is out of date
