@@ -159,7 +159,7 @@ def _collect_data(data_file: Path, sites_list: list[str]):
     start = perf_counter()
     new_data = []
     for address in sites_list:
-        print(_debug(address), end=' ')
+        print(_debug(address), end=' ', flush=True)
         s = perf_counter()
         new_data.extend(trace_url(address))
         e = perf_counter()
@@ -204,6 +204,9 @@ def ping_url(address: str):
     _, _, possible_ips = gethostbyname_ex(address)
     host = ping(address)
     if host.address not in possible_ips:
+        # last hop of traceroute not in DNS address record
+        # traceroute might've timed out or DNS is out of date
+        # regardless, something is wrong
         print(
             _warn(f'{address} ip mismatch: {host.address} not one of {possible_ips}'))
         return None
