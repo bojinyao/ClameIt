@@ -9,11 +9,12 @@ from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
 from pprint import pformat
-from socket import gaierror, gethostbyname_ex
+from socket import gethostbyname_ex
 from time import perf_counter
 
 import pandas as pd
 from icmplib import Hop, Host, ICMPSocketError, multiping, ping, traceroute
+from scipy import stats
 
 from util.heptatet import HEPTATE_ENTRIES, Heptate
 from util.logging_color import _debug, _error, _info, _warn
@@ -149,14 +150,18 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
 
     # TODO: What to do with sites_data_df?
 
+    # TODO: Handle the case where everything is normal
+
     any_success = False
     all_success = True
     for popular_site in popular_sites_list:
-        try:
-            ping_url(popular_site)
+        site_df = popular_sites_data_df[popular_sites_data_df['site'] == popular_site]
+        if is_site_normal(popular_site, site_df):
             any_success = True
-        except socket.gaierror:
+            print(_info(f'{popular_site} appears normal'))
+        else:
             all_success = False
+            print(_error(f'{popular_site} appears problematic'))
 
     # 1. If we’re experiencing problems with all popular hosts, we conclude that it's a
     # problem with our ISP.
@@ -177,7 +182,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     # 2. If we’re experiencing problems with some, but not all popular hosts, we
     # conclude that it’s a problem with intermediate AS(es), and we can run traceroute
     # on our host of interest to get a finer granularity of information.
-    trace_data = trace_url(site)
+
     # TODO: Do something with this data
 
 
@@ -240,7 +245,7 @@ def trace_url(address: str) -> list[Heptate]:
                     h.max_rtt) for h in hops]
 
 
-def ping_url(address: str):
+def ping_url(address: str) -> Heptate:
     _, _, possible_ips = gethostbyname_ex(address)
     host = ping(address, count=NUM_PINGS)
     if host.address not in possible_ips:
@@ -261,6 +266,16 @@ def ping_url(address: str):
 
 def __utc_time_now():
     return pd.to_datetime('now', utc=True)
+
+
+def is_site_normal(url: str, past_df: pd.DataFrame) -> bool:
+    try:
+        ping_data = ping_url(url)
+        abs_zscores = np.abs(stats.zscore(past_df['max_rtt']))
+        past_df = past_df[abs_zscores < 3]
+        return ping_data.max_rtt - past_df < 2 * past_df['max_rtt'].max()
+    except socket.gaierror:
+        return False
 
 
 if __name__ == '__main__':
