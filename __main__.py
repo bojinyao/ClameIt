@@ -9,12 +9,12 @@ from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
 from pprint import pformat
-from socket import gethostbyname_ex
+from socket import gaierror, gethostbyname_ex
 from time import perf_counter
 
+import numpy as np
 import pandas as pd
 from icmplib import Hop, Host, ICMPSocketError, multiping, ping, traceroute
-from scipy import stats
 
 from util.heptatet import HEPTATE_ENTRIES, Heptate
 from util.logging_color import _debug, _error, _info, _warn
@@ -156,12 +156,21 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     all_success = True
     for popular_site in popular_sites_list:
         site_df = popular_sites_data_df[popular_sites_data_df['site'] == popular_site]
-        if is_site_normal(popular_site, site_df):
+        try:
+            zscore, curr_max_rtt, mean_max_rtt = site_max_rtt_zscore(popular_site,
+                                                                     site_df)
+        except gaierror:
+            all_success = False
+
+        if zscore < 3:
             any_success = True
             print(_info(f'{popular_site} appears normal'))
         else:
             all_success = False
-            print(_error(f'{popular_site} appears problematic'))
+            # TODO: output max_rtt
+            print(_error(f'{popular_site} appears problematic '
+                         f'(max RTT: {curr_max_rtt}, '
+                         f'avg. past max RTT: {mean_max_rtt})'))
 
     # 1. If we’re experiencing problems with all popular hosts, we conclude that it's a
     # problem with our ISP.
@@ -268,14 +277,18 @@ def __utc_time_now():
     return pd.to_datetime('now', utc=True)
 
 
-def is_site_normal(url: str, past_df: pd.DataFrame) -> bool:
-    try:
-        ping_data = ping_url(url)
-        abs_zscores = np.abs(stats.zscore(past_df['max_rtt']))
-        past_df = past_df[abs_zscores < 3]
-        return ping_data.max_rtt - past_df < 2 * past_df['max_rtt'].max()
-    except socket.gaierror:
-        return False
+def site_max_rtt_zscore(url: str, past_df: pd.DataFrame) -> tuple[float, float, float]:
+    max_rtt_col = past_df['max_rtt']
+
+    # Remove outliers 3 STDs above the mean
+    abs_zscores = np.abs((max_rtt_col - max_rtt_col.mean()) / max_rtt_col.std())
+    max_rtt_col = max_rtt_col[abs_zscores < 3]
+
+    ping_data = ping_url(url)
+    mean_max_rtt = max_rtt_col.mean()
+    zscore = (ping_data.max_rtt - mean_max_rtt) / max_rtt_col.std()
+
+    return zscore, ping_data.max_rtt, mean_max_rtt
 
 
 if __name__ == '__main__':
