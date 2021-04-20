@@ -35,15 +35,15 @@ NUM_PINGS = 5
 
 """
 Heptatets (derivative, I know)
-site (url): url of website
 time: utc in iso format. `str(datetime.utcnow().isoformat())`
+site (url): url of website
 ip: ip address of site/url
 hop_num: the hop from host, use `.distance` attribute when using icmplib. 0 if pinging
 min_rtt: use `.min_rtt` attribute when using icmplib
 avg_rtt: use `.avg_rtt` attribute when using icmplib
 max_rtt: use `.max_rtt` attribute when using icmplib
 """
-DATA_COLUMNS = HEPTATE_ENTRIES  # ['site', 'time', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
+DATA_COLUMNS = HEPTATE_ENTRIES  # ['time', 'site', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
 
 
 def main():
@@ -194,8 +194,8 @@ def trace_url(address: str) -> list[Heptate]:
         print(
             _warn(f'{address} ip mismatch: {hops[-1].address} not one of {possible_ips}'))
         return []
-    return [Heptate(address,
-                    __time_now(),
+    return [Heptate(__time_now(),
+                    address,
                     h.address,
                     h.distance,
                     h.min_rtt,
@@ -213,8 +213,8 @@ def ping_url(address: str):
         print(
             _warn(f'{address} ip mismatch: {host.address} not one of {possible_ips}'))
         return None
-    return Heptate(address,
-                   __time_now(),
+    return Heptate(__time_now(),
+                   address,
                    host.address,
                    0,
                    host.min_rtt,
