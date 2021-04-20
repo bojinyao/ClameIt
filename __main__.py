@@ -111,7 +111,7 @@ def main():
 
     # Create parser for the "collect" sub-command
     parser_collect = subparser.add_parser('collect')
-    parser_collect.add_argument('set', choices=['popular', 'sites'])
+    parser_collect.add_argument('set', choices=['popular', 'sites', 'all'])
     parser_collect.set_defaults(func=lambda args: _handle_collect(args,
                                                                   popular_sites_data_file,
                                                                   popular_sites_list,
@@ -203,7 +203,10 @@ def _handle_collect(args, popular_sites_data_file: Path, popular_sites_list: lis
                     sites_data_file: Path, sites_list: list[str]):
     if args.set == 'popular':
         _collect_data(popular_sites_data_file, popular_sites_list)
-    else:  # 'sites'
+    elif args.set == 'sites':
+        _collect_data(sites_data_file, sites_list)
+    else:  # 'all'
+        _collect_data(popular_sites_data_file, popular_sites_list)
         _collect_data(sites_data_file, sites_list)
 
 
