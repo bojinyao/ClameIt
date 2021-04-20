@@ -1,22 +1,22 @@
 """
 icmplib documentation https://pypi.org/project/icmplib/
 ICMPSocketError covers timeout errors etc.
-As long as the program is ran with root privilege and 
+As long as the program is ran with root privilege and
 URIs are correct, this is all that is needed.
 """
 
-from time import perf_counter
+from argparse import ArgumentParser
 from datetime import datetime
 from pathlib import Path
-from argparse import ArgumentParser
-from icmplib import ping, multiping, traceroute, Host, Hop, ICMPSocketError
 from pprint import pformat
-from util.heptatet import Heptate, HEPTATE_ENTRIES
-from util.logging_color import _info, _warn, _error, _debug
+from socket import gaierror, gethostbyname_ex
+from time import perf_counter
 
-from socket import gethostbyname_ex
 import pandas as pd
+from icmplib import Hop, Host, ICMPSocketError, multiping, ping, traceroute
 
+from util.heptatet import HEPTATE_ENTRIES, Heptate
+from util.logging_color import _debug, _error, _info, _warn
 
 # Required file to read from
 POPULAR_SITES = 'popular_us_sites.csv'
@@ -120,7 +120,7 @@ def main():
     # Create parser for "analyze" sub-command
     parser_analyze = subparser.add_parser('analyze')
     # at least 1 site should be supplied for analysis
-    parser_analyze.add_argument('site', nargs='+')
+    parser_analyze.add_argument('site', nargs=1)
     parser_analyze.set_defaults(func=lambda args: _handle_analyze(args,
                                                                   popular_sites_data_file,
                                                                   popular_sites_list,
@@ -138,10 +138,41 @@ def main():
 def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: list[str],
                     sites_data_file: Path, sites_list: list[str]):
     popular_sites_data_df = pd.read_csv(popular_sites_data_file)
-
     sites_data_df = pd.read_csv(sites_data_file)
-    print(_debug(f'{args.site}'))
-    # TODO: analysis logic
+    site = args.site[0]
+
+    # TODO: What to do with sites_data_df?
+
+    any_success = False
+    all_success = True
+    for popular_site in popular_sites_list:
+        try:
+            ping_url(popular_site)
+            any_success = True
+        except socket.gaierror:
+            all_success = False
+
+    # 1. If we’re experiencing problems with all popular hosts, we conclude that it's a
+    # problem with our ISP.
+    if not any_success:
+        print(_info('Gateway router or ISP failure detected '
+                    '(no popular sites reachable)'))
+        return
+
+    # 3. If we’re not experiencing problems with any popular host, we conclude that it's
+    # a problem with our host of interest, and we can show some ping and traceroutes
+    # results if desired.
+    if all_success:
+        print(_info('Host of interest failure detected '
+                    '(all popular sites reachable)'))
+        print(_debug(pformat(trace_url(site))))
+        return
+
+    # 2. If we’re experiencing problems with some, but not all popular hosts, we
+    # conclude that it’s a problem with intermediate AS(es), and we can run traceroute
+    # on our host of interest to get a finer granularity of information.
+    trace_data = trace_url(site)
+    # TODO: Do something with this data
 
 
 def _handle_traceroute(args, sites_data_file: Path):
