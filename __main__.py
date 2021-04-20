@@ -167,7 +167,6 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
             print(_info(f'{popular_site} appears normal'))
         else:
             all_success = False
-            # TODO: output max_rtt
             print(_error(f'{popular_site} appears problematic '
                          f'(max RTT: {curr_max_rtt}, '
                          f'avg. past max RTT: {mean_max_rtt})'))
