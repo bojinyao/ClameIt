@@ -35,13 +35,13 @@ NUM_PINGS = 5
 
 """
 Heptatets (derivative, I know)
-time: utc in iso format. `str(datetime.utcnow().isoformat())`
-site (url): url of website
-ip: ip address of site/url
-hop_num: the hop from host, use `.distance` attribute when using icmplib. 0 if pinging
-min_rtt: use `.min_rtt` attribute when using icmplib
-avg_rtt: use `.avg_rtt` attribute when using icmplib
-max_rtt: use `.max_rtt` attribute when using icmplib
+time (pandas datetime): pandas datetime object
+site/url (str): url of website
+ip (str): ip address of site/url
+hop_num (int): the hop from host, use `.distance` attribute when using icmplib. 0 if pinging
+min_rtt (float): use `.min_rtt` attribute when using icmplib
+avg_rtt (float): use `.avg_rtt` attribute when using icmplib
+max_rtt (float): use `.max_rtt` attribute when using icmplib
 """
 DATA_COLUMNS = HEPTATE_ENTRIES  # ['time', 'site', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
 
@@ -137,11 +137,20 @@ def main():
 
 def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: list[str],
                     sites_data_file: Path, sites_list: list[str]):
-    popular_sites_data_df = pd.read_csv(popular_sites_data_file)
+    popular_sites_data_df = pd.read_csv(popular_sites_data_file, 
+                                        parse_dates=True, 
+                                        infer_datetime_format=True,
+                                        index_col=DATA_COLUMNS[0])
 
-    sites_data_df = pd.read_csv(sites_data_file)
+    sites_data_df = pd.read_csv(sites_data_file, 
+                                parse_dates=True, 
+                                infer_datetime_format=True,
+                                index_col=DATA_COLUMNS[0])
+    
     print(_debug(f'{args.site}'))
     # TODO: analysis logic
+    print(popular_sites_data_df)
+    print(sites_data_df)
 
 
 def _handle_traceroute(args, sites_data_file: Path):
@@ -194,7 +203,7 @@ def trace_url(address: str) -> list[Heptate]:
         print(
             _warn(f'{address} ip mismatch: {hops[-1].address} not one of {possible_ips}'))
         return []
-    return [Heptate(__time_now(),
+    return [Heptate(__utc_time_now(),
                     address,
                     h.address,
                     h.distance,
@@ -213,7 +222,7 @@ def ping_url(address: str):
         print(
             _warn(f'{address} ip mismatch: {host.address} not one of {possible_ips}'))
         return None
-    return Heptate(__time_now(),
+    return Heptate(__utc_time_now(),
                    address,
                    host.address,
                    0,
@@ -222,9 +231,8 @@ def ping_url(address: str):
                    host.max_rtt)
 
 
-def __time_now():
-    # use .fromisoformat(str) to convert string back to datetime obj
-    return str(datetime.utcnow().isoformat())
+def __utc_time_now():
+    return pd.to_datetime('now', utc=True)
 
 
 if __name__ == '__main__':
