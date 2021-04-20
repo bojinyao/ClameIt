@@ -137,16 +137,16 @@ def main():
 
 def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: list[str],
                     sites_data_file: Path, sites_list: list[str]):
-    popular_sites_data_df = pd.read_csv(popular_sites_data_file, 
-                                        parse_dates=True, 
+    popular_sites_data_df = pd.read_csv(popular_sites_data_file,
+                                        parse_dates=True,
                                         infer_datetime_format=True,
                                         index_col=DATA_COLUMNS[0])
 
-    sites_data_df = pd.read_csv(sites_data_file, 
-                                parse_dates=True, 
+    sites_data_df = pd.read_csv(sites_data_file,
+                                parse_dates=True,
                                 infer_datetime_format=True,
                                 index_col=DATA_COLUMNS[0])
-    
+
     print(_debug(f'{args.site}'))
     # TODO: analysis logic
     print(popular_sites_data_df)
