@@ -148,7 +148,8 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                                        index_col=DATA_COLUMNS[0])
     site = args.site[0]
 
-    # TODO: Handle the case where everything is normal
+    # Find last hops for each popular sites, which we use to compare max RTTs against
+    popular_sites_data_df = extract_last_hops(popular_sites_data_df)
 
     print(_info('Checking popular hosts...'))
     any_success = False
@@ -321,6 +322,16 @@ def max_rtt_stats(current: Heptate, past_df: pd.DataFrame) -> tuple[float, float
     zscore = (current.max_rtt - mean_max_rtt) / max_rtt_col.std()
 
     return zscore, current.max_rtt, mean_max_rtt
+
+
+def extract_last_hops(df: pd.DataFrame) -> pd.DataFrame:
+    last_hop_indices = []
+    for i in range(len(df) - 1):
+        if df.iloc[i]['site'] != df.iloc[i + 1]['site']:
+            last_hop_indices.append(i)
+    last_hop_indices.append(len(df) - 1)
+
+    return df.iloc[last_hop_indices]
 
 
 if __name__ == '__main__':
