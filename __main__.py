@@ -142,23 +142,22 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                                         parse_dates=True,
                                         infer_datetime_format=True,
                                         index_col=DATA_COLUMNS[0])
-    sites_data_df = pd.read_csv(sites_data_file,
-                                parse_dates=True,
-                                infer_datetime_format=True,
-                                index_col=DATA_COLUMNS[0])
+    custom_sites_data_df = pd.read_csv(sites_data_file,
+                                       parse_dates=True,
+                                       infer_datetime_format=True,
+                                       index_col=DATA_COLUMNS[0])
     site = args.site[0]
-
-    # TODO: What to do with sites_data_df?
 
     # TODO: Handle the case where everything is normal
 
+    print(_info('Checking popular hosts...'))
     any_success = False
     all_success = True
     for popular_site in popular_sites_list:
         site_df = popular_sites_data_df[popular_sites_data_df['site'] == popular_site]
         try:
-            zscore, curr_max_rtt, mean_max_rtt = site_max_rtt_zscore(popular_site,
-                                                                     site_df)
+            zscore, curr_max_rtt, mean_max_rtt = site_max_rtt_stats(popular_site,
+                                                                    site_df)
         except gaierror:
             all_success = False
 
@@ -181,17 +180,33 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     # 3. If we’re not experiencing problems with any popular host, we conclude that it's
     # a problem with our host of interest, and we can show some ping and traceroutes
     # results if desired.
-    if all_success:
-        print(_info('Host of interest failure detected '
-                    '(all popular sites reachable)'))
-        print(_debug(pformat(trace_url(site))))
-        return
 
     # 2. If we’re experiencing problems with some, but not all popular hosts, we
     # conclude that it’s a problem with intermediate AS(es), and we can run traceroute
     # on our host of interest to get a finer granularity of information.
 
-    # TODO: Do something with this data
+    # First get all the hops between this device and the host of interest
+    print()
+    print(_info('Checking host of interest...'))
+    hops = trace_url(site)
+    for i, hop in enumerate(hops):
+        # Skip this hop if we've never seen it before
+        if hop.ip not in custom_sites_data_df['ip']:
+            print(_warn(f'Hop #{i} ({hop.ip}) is not in historical data'))
+            continue
+
+        ip_df = custom_sites_data_df[custom_sites_data_df['ip'] == hop.ip]
+        zscore, curr_max_rtt, mean_max_rtt = max_rtt_stats(popular_site, ip_df)
+        if zscore < 3:
+            print(_info(f'Hop #{i} ({hop.ip}) appears normal'))
+        else:
+            print(_error(f'Hop #{i} ({hop.ip}) appears problematic '
+                         f'(max RTT: {curr_max_rtt}, '
+                         f'avg. past max RTT: {mean_max_rtt}); '
+                         'this could be the culprit.'))
+            break
+
+    # TODO: What to do when no problem found?
 
 
 def _handle_traceroute(args, sites_data_file: Path):
@@ -279,18 +294,24 @@ def __utc_time_now():
     return pd.to_datetime('now', utc=True)
 
 
-def site_max_rtt_zscore(url: str, past_df: pd.DataFrame) -> tuple[float, float, float]:
+def site_max_rtt_stats(url: str, past_df: pd.DataFrame) -> tuple[float, float, float]:
+    ping_data = ping_url(url)
+    return max_rtt_stats(ping_data, past_df)
+
+
+# TODO: Make the return type a dataclass/namedtuple
+def max_rtt_stats(current: Heptate, past_df: pd.DataFrame) -> tuple[float, float, float]:
+    '''Returns (zscore, current_max_rtt, mean_max_rtt_without_outliers).'''
     max_rtt_col = past_df['max_rtt']
 
     # Remove outliers 3 STDs above the mean
     abs_zscores = np.abs((max_rtt_col - max_rtt_col.mean()) / max_rtt_col.std())
     max_rtt_col = max_rtt_col[abs_zscores < 3]
 
-    ping_data = ping_url(url)
     mean_max_rtt = max_rtt_col.mean()
-    zscore = (ping_data.max_rtt - mean_max_rtt) / max_rtt_col.std()
+    zscore = (current.max_rtt - mean_max_rtt) / max_rtt_col.std()
 
-    return zscore, ping_data.max_rtt, mean_max_rtt
+    return zscore, current.max_rtt, mean_max_rtt
 
 
 if __name__ == '__main__':
