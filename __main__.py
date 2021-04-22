@@ -1,12 +1,4 @@
-"""
-icmplib documentation https://pypi.org/project/icmplib/
-ICMPSocketError covers timeout errors etc.
-As long as the program is ran with root privilege and
-URIs are correct, this is all that is needed.
-"""
-
 from argparse import ArgumentParser
-from datetime import datetime
 from pathlib import Path
 from pprint import pformat
 from socket import gaierror, gethostbyname_ex
@@ -14,7 +6,7 @@ from time import perf_counter
 
 import numpy as np
 import pandas as pd
-from icmplib import Hop, Host, ICMPSocketError, multiping, ping, traceroute
+from icmplib import Hop, Host, ping, traceroute
 
 from util.heptatet import HEPTATE_ENTRIES, Heptate
 from util.logging_color import _debug, _error, _info, _warn
@@ -262,9 +254,9 @@ and ping is pinging the right ip
 """
 
 
-def trace_url(address: str) -> list[Heptate]:
+def trace_url(address: str, num_pings=NUM_PINGS) -> list[Heptate]:
     _, _, possible_ips = gethostbyname_ex(address)
-    hops: list[Hop] = traceroute(address, count=NUM_PINGS)
+    hops: list[Hop] = traceroute(address, count=num_pings)
     if hops[-1].address not in possible_ips:
         # last hop of traceroute not in DNS address record
         # traceroute might've timed out or DNS is out of date
@@ -281,9 +273,9 @@ def trace_url(address: str) -> list[Heptate]:
                     h.max_rtt) for h in hops]
 
 
-def ping_url(address: str) -> Heptate:
+def ping_url(address: str, num_pings=NUM_PINGS):
     _, _, possible_ips = gethostbyname_ex(address)
-    host = ping(address, count=NUM_PINGS)
+    host = ping(address, count=num_pings)
     if host.address not in possible_ips:
         # last hop of traceroute not in DNS address record
         # traceroute might've timed out or DNS is out of date
@@ -298,6 +290,10 @@ def ping_url(address: str) -> Heptate:
                    host.min_rtt,
                    host.avg_rtt,
                    host.max_rtt)
+
+
+def multi_ping_urls(addresses: list[str], num_pings=NUM_PINGS):
+    return [ping_url(address, num_pings) for address in addresses]
 
 
 def __utc_time_now():
