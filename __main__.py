@@ -170,43 +170,52 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                          f'(max RTT: {curr_max_rtt}, '
                          f'avg. past max RTT: {mean_max_rtt})'))
 
-    # 1. If we’re experiencing problems with all popular hosts, we conclude that it's a
+    # If we’re experiencing problems with all popular hosts, we conclude that it's a
     # problem with our ISP.
     if not any_success:
-        print(_info('Gateway router or ISP failure detected '
-                    '(no popular sites reachable)'))
+        print()
+        print(_error('All popular sites appear problematic, either having abnormally '
+                     'high RTT or unreachable. This like indicates a gateway router or '
+                     ' ISP problem.'))
         return
 
-    # 3. If we’re not experiencing problems with any popular host, we conclude that it's
-    # a problem with our host of interest, and we can show some ping and traceroutes
-    # results if desired.
-
-    # 2. If we’re experiencing problems with some, but not all popular hosts, we
-    # conclude that it’s a problem with intermediate AS(es), and we can run traceroute
-    # on our host of interest to get a finer granularity of information.
+    # If we’re experiencing problems with some, but not all popular hosts, we conclude
+    # that it’s a problem with intermediate AS(es), and we can run traceroute on our
+    # host of interest to get a finer granularity of information.
 
     # First get all the hops between this device and the host of interest
     print()
     print(_info('Checking host of interest...'))
     hops = trace_url(site)
-    for i, hop in enumerate(hops):
+    culprit = None
+    for hop in hops:
         # Skip this hop if we've never seen it before
         if hop.ip not in custom_sites_data_df['ip'].values:
-            print(_warn(f'Hop #{i} ({hop.ip}) is not in historical data'))
+            print(_warn(f'Hop #{hop.hop_num} ({hop.ip}) is not in historical data'))
             continue
 
         ip_df = custom_sites_data_df[custom_sites_data_df['ip'] == hop.ip]
         zscore, curr_max_rtt, mean_max_rtt = max_rtt_stats(hop, ip_df)
         if zscore < 3:
-            print(_info(f'Hop #{i} ({hop.ip}) appears normal'))
+            print(_info(f'Hop #{hop.hop_num} ({hop.ip}) appears normal'))
         else:
-            print(_error(f'Hop #{i} ({hop.ip}) appears problematic '
+            print(_error(f'Hop #{hop.hop_num} ({hop.ip}) appears problematic '
                          f'(max RTT: {curr_max_rtt}, '
                          f'avg. past max RTT: {mean_max_rtt}); '
                          'this could be the culprit.'))
-            break
 
-    # TODO: What to do when no problem found?
+            # Remember the first problematic hop
+            if culprit is None:
+                culprit = hop
+
+    print()
+    if culprit is not None:
+        print(_error(f'Hop #{culprit.hop_num} ({culprit.ip}) on the path from this '
+                     f'device to {site} was the first one that appeared problematic '
+                     '(having an abnormally high RTT). This is likely the culprit of '
+                     'your connection problem.'))
+    else:
+        print(_info('No connection problem detected. Everything seems to be working.'))
 
 
 def _handle_traceroute(args, sites_data_file: Path):
