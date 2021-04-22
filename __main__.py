@@ -191,12 +191,12 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     hops = trace_url(site)
     for i, hop in enumerate(hops):
         # Skip this hop if we've never seen it before
-        if hop.ip not in custom_sites_data_df['ip']:
+        if hop.ip not in custom_sites_data_df['ip'].values:
             print(_warn(f'Hop #{i} ({hop.ip}) is not in historical data'))
             continue
 
         ip_df = custom_sites_data_df[custom_sites_data_df['ip'] == hop.ip]
-        zscore, curr_max_rtt, mean_max_rtt = max_rtt_stats(popular_site, ip_df)
+        zscore, curr_max_rtt, mean_max_rtt = max_rtt_stats(hop, ip_df)
         if zscore < 3:
             print(_info(f'Hop #{i} ({hop.ip}) appears normal'))
         else:
