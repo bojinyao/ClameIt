@@ -11,17 +11,24 @@ from icmplib import Hop, Host, ping, traceroute
 from util.heptatet import HEPTATE_ENTRIES, Heptate
 from util.logging_color import _debug, _error, _info, _warn
 
+# ---------------------------- User Configurations --------------------------- #
+
 # Required file to read from
 POPULAR_SITES = 'popular_us_sites.csv'
-SITES = 'sites.csv'
+FREQUENT_SITES = 'frequent_sites.csv'
 
 # directory where all the data files are saved
 DATA_DIR = 'data'
 
+# -------------------------- Internal Configurations ------------------------- #
+
 # data on popular sites
 POPULAR_SITES_DATA = 'popular_sites_data.csv'
 # data on (frequently) visited sites
-SITES_DATA = 'sites_data.csv'
+FREQUENT_SITES_DATA = 'frequent_sites_data.csv'
+
+BAD_POPULAR_SITES_DATA = f'bad_{POPULAR_SITES_DATA}'
+BAD_FREQUENT_SITES_DATA = f'bad_{FREQUENT_SITES_DATA}'
 
 # Perform 5 pings per traceroute/ping for data collection
 NUM_PINGS = 5
@@ -51,35 +58,55 @@ def main():
         print(_error(f'{POPULAR_SITES} does not exist and is needed'))
         exit(1)
 
-    sites = target_dir.joinpath(SITES)
-    if not sites.exists():
-        print(_error(f'{SITES} does not exist and is needed'))
+    frequent_sites = target_dir.joinpath(FREQUENT_SITES)
+    if not frequent_sites.exists():
+        print(_error(f'{FREQUENT_SITES} does not exist and is needed'))
         exit(1)
 
-    # Setting up data files if doesn't exist
+    # ----------------- Setting Up Data Files ---------------- #
+    # Create data directory
     data_dir = target_dir.joinpath(DATA_DIR)
     if not data_dir.exists():
         data_dir.mkdir()
         print(_info(f'Created {DATA_DIR} directory'))
 
+    # Set up popular sites data file if necessary
     popular_sites_data_file = data_dir.joinpath(POPULAR_SITES_DATA)
     if not popular_sites_data_file.exists():
         popular_sites_data_file.touch(exist_ok=False)
         print(_info(f'Created {popular_sites_data_file} file'))
 
-    sites_data_file = data_dir.joinpath(SITES_DATA)
-    if not sites_data_file.exists():
-        sites_data_file.touch(exist_ok=False)
-        print(_info(f'Created {sites_data_file} file'))
-
-    # write in csv headers for empty file
     if popular_sites_data_file.stat().st_size == 0:
         pd.DataFrame(columns=DATA_COLUMNS).to_csv(
             popular_sites_data_file, index=False)
 
-    # write in csv headers for empty file
-    if sites_data_file.stat().st_size == 0:
-        pd.DataFrame(columns=DATA_COLUMNS).to_csv(sites_data_file, index=False)
+    # Set up bad popular sites data file if necessary
+    bad_popular_sites_data_file = data_dir.joinpath(BAD_POPULAR_SITES_DATA)
+    if not bad_popular_sites_data_file.exists():
+        bad_popular_sites_data_file.touch(exist_ok=False)
+        print(_info(f'Created {bad_popular_sites_data_file} file'))
+        
+    if bad_popular_sites_data_file.stat().st_size == 0:
+        pd.DataFrame(columns=DATA_COLUMNS).to_csv(
+            bad_popular_sites_data_file, index=False)
+
+    # Set up frequent sites data file if necessary
+    frequent_sites_data_file = data_dir.joinpath(FREQUENT_SITES_DATA)
+    if not frequent_sites_data_file.exists():
+        frequent_sites_data_file.touch(exist_ok=False)
+        print(_info(f'Created {frequent_sites_data_file} file'))
+
+    if frequent_sites_data_file.stat().st_size == 0:
+        pd.DataFrame(columns=DATA_COLUMNS).to_csv(frequent_sites_data_file, index=False)
+
+    # Set up bad frequent sites data file if necessary
+    bad_frequent_sites_data_file = data_dir.joinpath(BAD_FREQUENT_SITES_DATA)
+    if not bad_frequent_sites_data_file.exists():
+        bad_frequent_sites_data_file.touch(exist_ok=False)
+        print(_info(f'Created {bad_frequent_sites_data_file} file'))
+    
+    if bad_frequent_sites_data_file.stat().st_size == 0:
+        pd.DataFrame(columns=DATA_COLUMNS).to_csv(bad_frequent_sites_data_file, index=False)
 
     # ######################################################## #
     # ##################### Read in files #################### #
@@ -87,7 +114,7 @@ def main():
     popular_sites_list: list[str] = list(
         pd.read_csv(popular_sites, squeeze=True))
 
-    sites_list: list[str] = list(pd.read_csv(sites, squeeze=True))
+    frequent_sites_list: list[str] = list(pd.read_csv(frequent_sites, squeeze=True))
 
     # ######################################################## #
     # #################### Parse Arguments ################### #
@@ -99,16 +126,16 @@ def main():
     parser_traceroute = subparser.add_parser('traceroute')
     parser_traceroute.add_argument('site', nargs='+')
     parser_traceroute.set_defaults(func=lambda args: _handle_traceroute(args,
-                                                                        sites_data_file))
+                                                                        frequent_sites_data_file))
 
     # Create parser for the "collect" sub-command
     parser_collect = subparser.add_parser('collect')
-    parser_collect.add_argument('set', choices=['popular', 'sites', 'all'])
+    parser_collect.add_argument('set', choices=['popular', 'frequent', 'all'])
     parser_collect.set_defaults(func=lambda args: _handle_collect(args,
                                                                   popular_sites_data_file,
                                                                   popular_sites_list,
-                                                                  sites_data_file,
-                                                                  sites_list))
+                                                                  frequent_sites_data_file,
+                                                                  frequent_sites_list))
 
     # Create parser for "analyze" sub-command
     parser_analyze = subparser.add_parser('analyze')
@@ -117,8 +144,8 @@ def main():
     parser_analyze.set_defaults(func=lambda args: _handle_analyze(args,
                                                                   popular_sites_data_file,
                                                                   popular_sites_list,
-                                                                  sites_data_file,
-                                                                  sites_list))
+                                                                  frequent_sites_data_file,
+                                                                  frequent_sites_list))
 
     args = parser.parse_args()
     args.func(args)
@@ -216,14 +243,14 @@ def _handle_traceroute(args, sites_data_file: Path):
 
 
 def _handle_collect(args, popular_sites_data_file: Path, popular_sites_list: list[str],
-                    sites_data_file: Path, sites_list: list[str]):
+                    frequent_sites_data_file: Path, frequent_sites_list: list[str]):
     if args.set == 'popular':
         _collect_data(popular_sites_data_file, popular_sites_list)
-    elif args.set == 'sites':
-        _collect_data(sites_data_file, sites_list)
+    elif args.set == 'frequent':
+        _collect_data(frequent_sites_data_file, frequent_sites_list)
     else:  # 'all'
         _collect_data(popular_sites_data_file, popular_sites_list)
-        _collect_data(sites_data_file, sites_list)
+        _collect_data(frequent_sites_data_file, frequent_sites_list)
 
 
 def _collect_data(data_file: Path, sites_list: list[str]):
