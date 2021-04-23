@@ -286,7 +286,7 @@ def _collect_data(data_file: Path, bad_data_file: Path, sites_list: list[str]):
         pd.DataFrame(data=new_bad_data).to_csv(
             bad_data_file, index=False, mode='a', header=False)
     end = perf_counter()
-    print(_info(f'Done in {round(end - start, 2)} seconds.\n'))
+    print(_info(f'Done in {round(end - start, 2)} seconds.'))
     if len(new_good_data) > 0:
         print(_info(f'+ {len(new_good_data)} to {data_file}'))
     if len(new_bad_data) > 0:
