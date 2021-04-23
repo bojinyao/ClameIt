@@ -52,7 +52,7 @@ def main():
     # ######################################################## #
     # NOTE: All I/O is relative to the directory where *this* file is
     target_dir = Path(__file__).parent
-    # Check for required files
+    # --------------- Check for Required Files --------------- #
     popular_sites = target_dir.joinpath(POPULAR_SITES)
     if not popular_sites.exists():
         print(_error(f'{POPULAR_SITES} does not exist and is needed'))
@@ -124,7 +124,7 @@ def main():
 
     # Create parser for "traceroute" sub-command
     parser_traceroute = subparser.add_parser('traceroute')
-    parser_traceroute.add_argument('site', nargs='+')
+    parser_traceroute.add_argument('sites', nargs='+')
     parser_traceroute.set_defaults(func=lambda args: _handle_traceroute(args,
                                                                         frequent_sites_data_file,
                                                                         bad_frequent_sites_data_file))
@@ -242,7 +242,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
 
 
 def _handle_traceroute(args, sites_data_file: Path, sites_bad_data_file: Path):
-    _collect_data(sites_data_file, sites_bad_data_file, args.site)
+    _collect_data(sites_data_file, sites_bad_data_file, args.sites)
 
 
 def _handle_collect(args, popular_sites_data_file: Path, bad_popular_sites_data_file: Path,
