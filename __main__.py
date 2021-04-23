@@ -286,9 +286,11 @@ def _collect_data(data_file: Path, bad_data_file: Path, sites_list: list[str]):
         pd.DataFrame(data=new_bad_data).to_csv(
             bad_data_file, index=False, mode='a', header=False)
     end = perf_counter()
-    print(_info(f'Done in {round(end - start, 2)} seconds.\n'
-                f'+ {len(new_good_data)} to {data_file}\n'
-                f'+ {len(new_bad_data)} to {bad_data_file}'))
+    print(_info(f'Done in {round(end - start, 2)} seconds.\n'))
+    if len(new_good_data) > 0:
+        print(_info(f'+ {len(new_good_data)} to {data_file}'))
+    if len(new_bad_data) > 0:
+        print(_warn(f'+ {len(new_bad_data)} to {bad_data_file}'))
 
 
 # ---------------------------------------------------------------------------- #
@@ -325,13 +327,11 @@ def trace_url(address: str, num_pings=NUM_PINGS):
 def ping_url(address: str, num_pings=NUM_PINGS):
     t = __utc_time_now()
     host = ping(address, count=num_pings)
-    alive = True
     if not host.is_alive:
         # Failed to reach address
         print(
             _warn(f'{address} not reachable'))
-        alive = False
-    return alive, Heptate(t,
+    return host.is_alive, Heptate(t,
                    address,
                    host.address,
                    0,
