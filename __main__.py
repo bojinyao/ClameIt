@@ -30,8 +30,8 @@ FREQUENT_SITES_DATA = 'frequent_sites_data.csv'
 BAD_POPULAR_SITES_DATA = f'bad_{POPULAR_SITES_DATA}'
 BAD_FREQUENT_SITES_DATA = f'bad_{FREQUENT_SITES_DATA}'
 
-# Perform 5 pings per traceroute/ping for data collection
-NUM_PINGS = 5
+# Perform 4 pings per traceroute/ping for data collection
+NUM_PINGS = 4
 
 """
 Heptatets (derivative, I know)
