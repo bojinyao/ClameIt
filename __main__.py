@@ -126,15 +126,18 @@ def main():
     parser_traceroute = subparser.add_parser('traceroute')
     parser_traceroute.add_argument('site', nargs='+')
     parser_traceroute.set_defaults(func=lambda args: _handle_traceroute(args,
-                                                                        frequent_sites_data_file))
+                                                                        frequent_sites_data_file,
+                                                                        bad_frequent_sites_data_file))
 
     # Create parser for the "collect" sub-command
     parser_collect = subparser.add_parser('collect')
     parser_collect.add_argument('set', choices=['popular', 'frequent', 'all'])
     parser_collect.set_defaults(func=lambda args: _handle_collect(args,
                                                                   popular_sites_data_file,
+                                                                  bad_popular_sites_data_file,
                                                                   popular_sites_list,
                                                                   frequent_sites_data_file,
+                                                                  bad_frequent_sites_data_file,
                                                                   frequent_sites_list))
 
     # Create parser for "analyze" sub-command
@@ -206,7 +209,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     # First get all the hops between this device and the host of interest
     print()
     print(_info('Checking host of interest...'))
-    hops = trace_url(site)
+    ok, hops = trace_url(site)
     culprit = None
     for hop in hops:
         # Skip this hop if we've never seen it before
@@ -238,36 +241,54 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
         print(_info('No connection problem detected. Everything seems to be working.'))
 
 
-def _handle_traceroute(args, sites_data_file: Path):
-    _collect_data(sites_data_file, args.site)
+def _handle_traceroute(args, sites_data_file: Path, sites_bad_data_file: Path):
+    _collect_data(sites_data_file, sites_bad_data_file, args.site)
 
 
-def _handle_collect(args, popular_sites_data_file: Path, popular_sites_list: list[str],
-                    frequent_sites_data_file: Path, frequent_sites_list: list[str]):
+def _handle_collect(args, popular_sites_data_file: Path, bad_popular_sites_data_file: Path,
+                    popular_sites_list: list[str],
+                    frequent_sites_data_file: Path, bad_frequent_sites_data_file: Path,
+                    frequent_sites_list: list[str]):
     if args.set == 'popular':
-        _collect_data(popular_sites_data_file, popular_sites_list)
+        _collect_data(popular_sites_data_file,
+                      bad_popular_sites_data_file, popular_sites_list)
     elif args.set == 'frequent':
-        _collect_data(frequent_sites_data_file, frequent_sites_list)
+        _collect_data(frequent_sites_data_file,
+                      bad_frequent_sites_data_file, frequent_sites_list)
     else:  # 'all'
-        _collect_data(popular_sites_data_file, popular_sites_list)
-        _collect_data(frequent_sites_data_file, frequent_sites_list)
+        _collect_data(popular_sites_data_file,
+                      bad_popular_sites_data_file, popular_sites_list)
+        _collect_data(frequent_sites_data_file,
+                      bad_frequent_sites_data_file, frequent_sites_list)
 
 
-def _collect_data(data_file: Path, sites_list: list[str]):
+def _collect_data(data_file: Path, bad_data_file: Path, sites_list: list[str]):
     print(
-        _info(f'Start collecting on {pformat(sites_list)}, save to {data_file}'))
+        _info(f'Start collecting on:\n'
+              f'{pformat(sites_list)}'))
     start = perf_counter()
-    new_data = []
+    new_good_data = []
+    new_bad_data = []
     for address in sites_list:
         print(_debug(address), end=' ', flush=True)
         s = perf_counter()
-        new_data.extend(trace_url(address))
+        ok, hops = trace_url(address)
+        if ok:
+            new_good_data.extend(hops)
+        else:
+            new_bad_data.extend(hops)
         e = perf_counter()
         print(_debug(f'{round(e - s, 2)} seconds'))
-    pd.DataFrame(data=new_data).to_csv(
-        data_file, index=False, mode='a', header=False)
+    if len(new_good_data) > 0:
+        pd.DataFrame(data=new_good_data).to_csv(
+            data_file, index=False, mode='a', header=False)
+    if len(new_bad_data) > 0:
+        pd.DataFrame(data=new_bad_data).to_csv(
+            bad_data_file, index=False, mode='a', header=False)
     end = perf_counter()
-    print(_info(f'Done in {round(end - start, 2)} seconds'))
+    print(_info(f'Done in {round(end - start, 2)} seconds.\n'
+                f'+ {len(new_good_data)} to {data_file}\n'
+                f'+ {len(new_bad_data)} to {bad_data_file}'))
 
 
 # ---------------------------------------------------------------------------- #
@@ -281,17 +302,18 @@ and ping is pinging the right ip
 """
 
 
-def trace_url(address: str, num_pings=NUM_PINGS) -> list[Heptate]:
+def trace_url(address: str, num_pings=NUM_PINGS):
     _, _, possible_ips = gethostbyname_ex(address)
     hops: list[Hop] = traceroute(address, count=num_pings)
+    ok = True
     if hops[-1].address not in possible_ips:
         # last hop of traceroute not in DNS address record
         # traceroute might've timed out or DNS is out of date
         # regardless, something is wrong
         print(
             _warn(f'{address} ip mismatch: {hops[-1].address} not one of {possible_ips}'))
-        return []
-    return [Heptate(__utc_time_now(),
+        ok = False
+    return ok, [Heptate(__utc_time_now(),
                     address,
                     h.address,
                     h.distance,
@@ -301,27 +323,21 @@ def trace_url(address: str, num_pings=NUM_PINGS) -> list[Heptate]:
 
 
 def ping_url(address: str, num_pings=NUM_PINGS):
-    _, _, possible_ips = gethostbyname_ex(address)
+    t = __utc_time_now()
     host = ping(address, count=num_pings)
-    if host.address not in possible_ips:
-        # last hop of traceroute not in DNS address record
-        # traceroute might've timed out or DNS is out of date
-        # regardless, something is wrong
+    alive = True
+    if not host.is_alive:
+        # Failed to reach address
         print(
-            _warn(f'{address} ip mismatch: {host.address} not one of {possible_ips}'))
-        return None
-    return Heptate(__utc_time_now(),
+            _warn(f'{address} not reachable'))
+        alive = False
+    return alive, Heptate(t,
                    address,
                    host.address,
                    0,
                    host.min_rtt,
                    host.avg_rtt,
                    host.max_rtt)
-
-
-def multi_ping_urls(addresses: list[str], num_pings=NUM_PINGS):
-    return [ping_url(address, num_pings) for address in addresses]
-
 
 def __utc_time_now():
     return pd.to_datetime('now', utc=True)
