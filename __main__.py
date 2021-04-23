@@ -344,7 +344,7 @@ def __utc_time_now():
 
 
 def site_max_rtt_stats(url: str, past_df: pd.DataFrame) -> tuple[float, float, float]:
-    ping_data = ping_url(url)
+    _, ping_data = ping_url(url)
     return max_rtt_stats(ping_data, past_df)
 
 
