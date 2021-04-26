@@ -150,6 +150,8 @@ def main():
     parser_analyze = subparser.add_parser('analyze')
     # at least 1 site should be supplied for analysis
     parser_analyze.add_argument('sites', nargs='+')
+    parser_analyze.add_argument('--fail-fast', default=False, action='store_true', dest='fail_fast',
+                                help='stop when first problem is found')
     parser_analyze.set_defaults(func=lambda args: _handle_analyze(args,
                                                                   popular_sites_data_file,
                                                                   popular_sites_list,
@@ -166,6 +168,9 @@ def main():
 
 def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: list[str],
                     frequent_sites_data_file: Path, frequent_sites_list: list[str]):
+    
+    fail_fast: bool = args.fail_fast
+    
     popular_sites_data_df = pd.read_csv(popular_sites_data_file,
                                         parse_dates=True,
                                         infer_datetime_format=True,
@@ -183,6 +188,8 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     zscore, _ = ip_filtered_rtt_zscore_mean(popular_sites_data_df, gateway_ip, heptate.max_rtt)
     if zscore >= BAD_ZSCORE:
         print('❌', _warn(f'Gateway ({gateway_ip}) is experiencing unusually high RTT.'))
+        if fail_fast:
+            return
     else:
         print('✅', _info(f'Gateway ({gateway_ip}) okay'))
     
@@ -200,6 +207,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                                 popular_sites_list,
                                 frequent_sites_data_df,
                                 frequent_sites_list,
+                                fail_fast,
                                 BAD_ZSCORE)
         elif site in popular_sites_list:
             __analyze_popular_site(site,
@@ -207,22 +215,27 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                                    popular_sites_list,
                                    frequent_sites_data_df,
                                    frequent_sites_list,
+                                   fail_fast,
                                    BAD_ZSCORE)
         else:
             __analyze_new_site(site,
                                popular_sites_data_df,
                                popular_sites_list,
+                               fail_fast,
                                BAD_ZSCORE)
 
 def __analyze_frequent_site(site: str, popular_sites_data_df: pd.DataFrame, popular_sites_list: list[str],
-                    frequent_sites_data_df: pd.DataFrame, frequent_sites_list: list[str], bad_zscore):
+                    frequent_sites_data_df: pd.DataFrame, frequent_sites_list: list[str],
+                    fail_fast: bool, bad_zscore: float):
     print(site)
 
 def __analyze_popular_site(site: str, popular_sites_data_df: pd.DataFrame, popular_sites_list: list[str],
-                    frequent_sites_data_df: pd.DataFrame, frequent_sites_list: list[str], bad_zscore):
+                    frequent_sites_data_df: pd.DataFrame, frequent_sites_list: list[str],
+                    fail_fast: bool, bad_zscore: float):
     print(site)
 
-def __analyze_new_site(site: str, popular_sites_data_df: pd.DataFrame, popular_sites_list: list[str], bad_zscore):
+def __analyze_new_site(site: str, popular_sites_data_df: pd.DataFrame, popular_sites_list: list[str],
+                       fail_fast: bool, bad_zscore: float):
     print(site)
 
 
