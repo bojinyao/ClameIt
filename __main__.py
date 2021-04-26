@@ -9,6 +9,7 @@ import pandas as pd
 from icmplib import Hop, Host, ping, traceroute
 
 from util.heptatet import HEPTATE_ENTRIES, Heptate
+from util.zscore_mean import ZscoreMean
 from util.logging_color import _debug, _error, _info, _warn
 
 # ---------------------------- User Configurations --------------------------- #
@@ -324,7 +325,7 @@ def trace_url(address: str, num_pings=NUM_PINGS):
                     h.max_rtt) for h in hops]
 
 
-def ping_url(address: str, num_pings=NUM_PINGS):
+def ping_url(address: str, num_pings=NUM_PINGS) -> tuple[bool, Heptate]:
     t = __utc_time_now()
     host = ping(address, count=num_pings)
     if not host.is_alive:
@@ -362,15 +363,35 @@ def max_rtt_stats(current: Heptate, past_df: pd.DataFrame) -> tuple[float, float
 
     return zscore, current.max_rtt, mean_max_rtt
 
+def last_x_days_df(df: pd.DataFrame, days: int):
+    assert days >= 0, f'days: {days} must be positive integer'
+    now = __utc_time_now()
+    x_days_ago = now - days * pd.offsets.Day()
+    x_days_ago_str = x_days_ago.strftime('%Y-%m-%d')
+    return df[x_days_ago_str:]
+
+def site_hop_ip_filtered_rtt_zscore_mean(df: pd.DataFrame, site: str, ip: str, 
+                                         max_rtt: float, rtt_col='max_rtt'):
+    mask = (df['site'] == site) & (df['ip'] == ip)
+    target_df = df[mask]
+    rtt_series = target_df[rtt_col]
+    
+    # remove rtt over 97.73 percentile (outliers over 3-std)
+    # rtt data resembles poisson distribution, so try to remove top percentiles
+    rtt_series_quantile = rtt_series.quantile(0.9773)
+    filterd_rtt_series = rtt_series[rtt_series < rtt_series_quantile]
+    filterd_rtt_series_mean = filterd_rtt_series.mean()
+    zscore = (max_rtt - filterd_rtt_series_mean) / filterd_rtt_series.std()
+    return ZscoreMean(zscore, filterd_rtt_series_mean)
 
 def extract_last_hops(df: pd.DataFrame) -> pd.DataFrame:
-    last_hop_indices = []
-    for i in range(len(df) - 1):
-        if df.iloc[i]['site'] != df.iloc[i + 1]['site']:
-            last_hop_indices.append(i)
-    last_hop_indices.append(len(df) - 1)
-
-    return df.iloc[last_hop_indices]
+    # shift hop_num temp forward once
+    df['hop_num_temp'] = df['hop_num'].shift(-1)
+    # last hop_num of temp would be N/A, so hardcode it to 1
+    df.iloc[-1, df.columns.get_loc('hop_num_temp')] = 1
+    # filter
+    res_df = df[df['hop_num'] > df['hop_num_temp']]
+    return res_df
 
 
 if __name__ == '__main__':
