@@ -183,7 +183,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     ok, heptate = ping_url(gateway_ip)
     if not ok:
         print(_error('Not connected to gateway. Exiting...'))
-        exit(1)
+        return
     # Check gateway max_rtt
     zscore, _ = ip_filtered_rtt_zscore_mean(popular_sites_data_df, gateway_ip, heptate.max_rtt)
     if zscore >= BAD_ZSCORE:
@@ -236,7 +236,23 @@ def __analyze_popular_site(site: str, popular_sites_data_df: pd.DataFrame, popul
 
 def __analyze_new_site(site: str, popular_sites_data_df: pd.DataFrame, popular_sites_list: list[str],
                        fail_fast: bool, bad_zscore: float):
-    print(site)
+    print(_info(f'A new site: {site}, running baseline tests...'))
+    popular_sites_pings = [ping_url(address) for address in popular_sites_list]
+    popular_sites_alive = [p[1] for p in popular_sites_pings if p[0]]
+    popular_sites_normal = [h.site for h in popular_sites_alive if ip_filtered_rtt_zscore_mean(popular_sites_data_df,
+                                                                                               h.ip,
+                                                                                               h.max_rtt,
+                                                                                               h.site).zscore < bad_zscore]
+    
+    if len(popular_sites_normal) == 0:
+        # If all popular sites are having trouble,something is wrong with middle ASes,
+        # or the entire internet itself
+        print('❌', _warn("All popular site experiencing problems, might be internal outage with ISP or network is partitioned"))
+    elif len(popular_sites_normal) < len(popular_sites_list):
+        # If some, but not all, popular sites are having trouble, some middle ASes are having trouble
+        print('❌', _warn(f"{len(popular_sites_normal)}/{len(popular_sites_list)} popular sites normal, certain middle AS(es) might be down"))
+    else:
+        print('✅', _info("All popular sites normal"))
 
 
 def _handle_traceroute(args, sites_data_file: Path, sites_bad_data_file: Path):
