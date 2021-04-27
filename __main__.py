@@ -149,7 +149,7 @@ def main():
     # Create parser for "analyze" sub-command
     parser_analyze = subparser.add_parser('analyze')
     # at least 1 site should be supplied for analysis
-    parser_analyze.add_argument('sites', nargs='+')
+    parser_analyze.add_argument('site')
     parser_analyze.add_argument('--fail-fast', default=False, action='store_true', dest='fail_fast',
                                 help='stop when first problem is found')
     parser_analyze.set_defaults(func=lambda args: _handle_analyze(args,
@@ -199,60 +199,76 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                                        index_col=DATA_COLUMNS[0])
     
     frequent_sites_data_df = last_x_days_df(frequent_sites_data_df, REFERENCE_DAYS)
-    
-    for site in args.sites:
-        if site in frequent_sites_list:
-            __analyze_frequent_site(site, 
-                                popular_sites_data_df,
-                                popular_sites_list,
-                                frequent_sites_data_df,
-                                frequent_sites_list,
-                                fail_fast,
-                                BAD_ZSCORE)
-        elif site in popular_sites_list:
-            __analyze_popular_site(site,
-                                   popular_sites_data_df,
-                                   popular_sites_list,
-                                   frequent_sites_data_df,
-                                   frequent_sites_list,
-                                   fail_fast,
-                                   BAD_ZSCORE)
+
+    site = args.site
+
+    # Find last hops for each popular sites, which we use to compare max RTTs against
+    popular_sites_data_df = extract_last_hops(popular_sites_data_df)
+
+    print(_info('Checking popular hosts...'))
+    any_success = False
+    for popular_site in popular_sites_list:
+        site_df = popular_sites_data_df[popular_sites_data_df['site'] == popular_site]
+        try:
+            zscore, curr_max_rtt, mean_max_rtt = site_max_rtt_stats(popular_site,
+                                                                    site_df)
+        except gaierror:
+            continue
+
+        if zscore < 3:
+            any_success = True
+            print(_info(f'{popular_site} appears normal'))
         else:
-            __analyze_new_site(site,
-                               popular_sites_data_df,
-                               popular_sites_list,
-                               fail_fast,
-                               BAD_ZSCORE)
+            print(_error(f'{popular_site} appears problematic '
+                         f'(max RTT: {curr_max_rtt}, '
+                         f'avg. past max RTT: {mean_max_rtt})'))
 
-def __analyze_frequent_site(site: str, popular_sites_data_df: pd.DataFrame, popular_sites_list: list[str],
-                    frequent_sites_data_df: pd.DataFrame, frequent_sites_list: list[str],
-                    fail_fast: bool, bad_zscore: float):
-    print(site)
+    # If we’re experiencing problems with all popular hosts, we conclude that it's a
+    # problem with our ISP.
+    if not any_success:
+        print()
+        print(_error('All popular sites appear problematic, either having abnormally '
+                     'high RTT or unreachable. This like indicates a gateway router or '
+                     ' ISP problem.'))
+        return
 
-def __analyze_popular_site(site: str, popular_sites_data_df: pd.DataFrame, popular_sites_list: list[str],
-                    frequent_sites_data_df: pd.DataFrame, frequent_sites_list: list[str],
-                    fail_fast: bool, bad_zscore: float):
-    print(site)
+    # If we’re experiencing problems with some, but not all popular hosts, we conclude
+    # that it’s a problem with intermediate AS(es), and we can run traceroute on our
+    # host of interest to get a finer granularity of information.
 
-def __analyze_new_site(site: str, popular_sites_data_df: pd.DataFrame, popular_sites_list: list[str],
-                       fail_fast: bool, bad_zscore: float):
-    print(_info(f'A new site: {site}, running baseline tests...'))
-    popular_sites_pings = [ping_url(address) for address in popular_sites_list]
-    popular_sites_alive = [p[1] for p in popular_sites_pings if p[0]]
-    popular_sites_normal = [h.site for h in popular_sites_alive if ip_filtered_rtt_zscore_mean(popular_sites_data_df,
-                                                                                               h.ip,
-                                                                                               h.max_rtt,
-                                                                                               h.site).zscore < bad_zscore]
-    
-    if len(popular_sites_normal) == 0:
-        # If all popular sites are having trouble,something is wrong with middle ASes,
-        # or the entire internet itself
-        print('❌', _warn("All popular site experiencing problems, might be internal outage with ISP or network is partitioned"))
-    elif len(popular_sites_normal) < len(popular_sites_list):
-        # If some, but not all, popular sites are having trouble, some middle ASes are having trouble
-        print('❌', _warn(f"{len(popular_sites_normal)}/{len(popular_sites_list)} popular sites normal, certain middle AS(es) might be down"))
+    # First get all the hops between this device and the host of interest
+    print()
+    print(_info('Checking host of interest...'))
+    ok, hops = trace_url(site)
+    culprit = None
+    for hop in hops:
+        # Skip this hop if we've never seen it before
+        if hop.ip not in frequent_sites_data_df['ip'].values:
+            print(_warn(f'Hop #{hop.hop_num} ({hop.ip}) is not in historical data'))
+            continue
+
+        ip_df = frequent_sites_data_df[frequent_sites_data_df['ip'] == hop.ip]
+        zscore, curr_max_rtt, mean_max_rtt = max_rtt_stats(hop, ip_df)
+        if zscore < 3:
+            print(_info(f'Hop #{hop.hop_num} ({hop.ip}) appears normal'))
+        else:
+            print(_error(f'Hop #{hop.hop_num} ({hop.ip}) appears problematic '
+                         f'(max RTT: {curr_max_rtt}, '
+                         f'avg. past max RTT: {mean_max_rtt}); '
+                         'this could be the culprit.'))
+
+            # Remember the first problematic hop
+            if culprit is None:
+                culprit = hop
+
+    print()
+    if culprit is not None:
+        print(_error(f'Hop #{culprit.hop_num} ({culprit.ip}) on the path from this '
+                     f'device to {site} was the first one that appeared problematic '
+                     '(having an abnormally high RTT). This is likely the culprit of '
+                     'your connection problem.'))
     else:
-        print('✅', _info("All popular sites normal"))
+        print(_info('No connection problem detected. Everything seems to be working.'))
 
 
 def _handle_traceroute(args, sites_data_file: Path, sites_bad_data_file: Path):
@@ -393,9 +409,6 @@ def get_gateway_ip(df: pd.DataFrame):
     hop_one_ip_col = hop_one['ip']
     return hop_one_ip_col.mode().iloc[0]
 
-if __name__ == '__main__':
-    main()
-
 def site_max_rtt_stats(url: str, past_df: pd.DataFrame) -> tuple[float, float, float]:
     _, ping_data = ping_url(url)
     return max_rtt_stats(ping_data, past_df)
@@ -415,84 +428,5 @@ def max_rtt_stats(current: Heptate, past_df: pd.DataFrame) -> tuple[float, float
 
     return zscore, current.max_rtt, mean_max_rtt
 
-    '''
-    popular_sites_data_df = pd.read_csv(popular_sites_data_file,
-                                        parse_dates=True,
-                                        infer_datetime_format=True,
-                                        index_col=DATA_COLUMNS[0])
-    custom_sites_data_df = pd.read_csv(frequent_sites_data_file,
-                                       parse_dates=True,
-                                       infer_datetime_format=True,
-                                       index_col=DATA_COLUMNS[0])
-    site = args.sites[0]
-
-    # Find last hops for each popular sites, which we use to compare max RTTs against
-    popular_sites_data_df = extract_last_hops(popular_sites_data_df)
-
-    print(_info('Checking popular hosts...'))
-    any_success = False
-    all_success = True
-    for popular_site in popular_sites_list:
-        site_df = popular_sites_data_df[popular_sites_data_df['site'] == popular_site]
-        try:
-            zscore, curr_max_rtt, mean_max_rtt = site_max_rtt_stats(popular_site,
-                                                                    site_df)
-        except gaierror:
-            all_success = False
-
-        if zscore < 3:
-            any_success = True
-            print(_info(f'{popular_site} appears normal'))
-        else:
-            all_success = False
-            print(_error(f'{popular_site} appears problematic '
-                         f'(max RTT: {curr_max_rtt}, '
-                         f'avg. past max RTT: {mean_max_rtt})'))
-
-    # If we’re experiencing problems with all popular hosts, we conclude that it's a
-    # problem with our ISP.
-    if not any_success:
-        print()
-        print(_error('All popular sites appear problematic, either having abnormally '
-                     'high RTT or unreachable. This like indicates a gateway router or '
-                     ' ISP problem.'))
-        return
-
-    # If we’re experiencing problems with some, but not all popular hosts, we conclude
-    # that it’s a problem with intermediate AS(es), and we can run traceroute on our
-    # host of interest to get a finer granularity of information.
-
-    # First get all the hops between this device and the host of interest
-    print()
-    print(_info('Checking host of interest...'))
-    ok, hops = trace_url(site)
-    culprit = None
-    for hop in hops:
-        # Skip this hop if we've never seen it before
-        if hop.ip not in custom_sites_data_df['ip'].values:
-            print(_warn(f'Hop #{hop.hop_num} ({hop.ip}) is not in historical data'))
-            continue
-
-        ip_df = custom_sites_data_df[custom_sites_data_df['ip'] == hop.ip]
-        zscore, curr_max_rtt, mean_max_rtt = max_rtt_stats(hop, ip_df)
-        if zscore < 3:
-            print(_info(f'Hop #{hop.hop_num} ({hop.ip}) appears normal'))
-        else:
-            print(_error(f'Hop #{hop.hop_num} ({hop.ip}) appears problematic '
-                         f'(max RTT: {curr_max_rtt}, '
-                         f'avg. past max RTT: {mean_max_rtt}); '
-                         'this could be the culprit.'))
-
-            # Remember the first problematic hop
-            if culprit is None:
-                culprit = hop
-
-    print()
-    if culprit is not None:
-        print(_error(f'Hop #{culprit.hop_num} ({culprit.ip}) on the path from this '
-                     f'device to {site} was the first one that appeared problematic '
-                     '(having an abnormally high RTT). This is likely the culprit of '
-                     'your connection problem.'))
-    else:
-        print(_info('No connection problem detected. Everything seems to be working.'))
-    '''
+if __name__ == '__main__':
+    main()
