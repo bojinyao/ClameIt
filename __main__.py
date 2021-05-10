@@ -39,6 +39,8 @@ REFERENCE_DAYS = 14
 
 BAD_ZSCORE = 3.0
 
+RTT_COL = 'avg_rtt'
+
 """
 Heptatets (derivative, I know)
 time (pandas datetime): pandas datetime object
@@ -379,8 +381,8 @@ def last_x_days_df(df: pd.DataFrame, days: int):
     x_days_ago_str = x_days_ago.strftime('%Y-%m-%d')
     return df[x_days_ago_str:]
 
-def ip_filtered_rtt_zscore_mean(df, ip: str, max_rtt: float, 
-                                site: str=None, rtt_col='max_rtt'):
+def ip_filtered_rtt_zscore_mean(df, ip: str, rtt: float, 
+                                site: str=None, rtt_col=RTT_COL):
     mask = (df['ip'] == ip)
     if site is not None:
         mask = mask & (df['site'] == site)
@@ -392,7 +394,7 @@ def ip_filtered_rtt_zscore_mean(df, ip: str, max_rtt: float,
     rtt_series_quantile = rtt_series.quantile(0.9773)
     filterd_rtt_series = rtt_series[rtt_series < rtt_series_quantile]
     filterd_rtt_series_mean = filterd_rtt_series.mean()
-    zscore = (max_rtt - filterd_rtt_series_mean) / filterd_rtt_series.std()
+    zscore = (rtt - filterd_rtt_series_mean) / filterd_rtt_series.std()
     return ZscoreMean(zscore, filterd_rtt_series_mean)
 
 def extract_last_hops(df: pd.DataFrame) -> pd.DataFrame:
@@ -407,7 +409,7 @@ def extract_last_hops(df: pd.DataFrame) -> pd.DataFrame:
 def get_gateway_ip(df: pd.DataFrame):
     hop_one = df[df['hop_num'] == 1]
     hop_one_ip_col = hop_one['ip']
-    return hop_one_ip_col.mode().iloc[0]
+    return hop_one_ip_col.iloc[-1]
 
 def site_max_rtt_stats(url: str, past_df: pd.DataFrame) -> tuple[float, float, float]:
     _, ping_data = ping_url(url)
