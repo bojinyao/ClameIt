@@ -1,3 +1,6 @@
-from collections import namedtuple
+from typing import NamedTuple
 
-ZscoreMean = namedtuple('ZscoreMean', ['zscore', 'mean_rtt'])
+class Stats(NamedTuple):
+    zscore: float
+    mean: float
+    std: float

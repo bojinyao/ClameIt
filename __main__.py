@@ -9,7 +9,7 @@ import pandas as pd
 from icmplib import Hop, Host, ping, traceroute
 
 from util.heptatet import HEPTATE_ENTRIES, Heptate
-from util.zscore_mean import ZscoreMean
+from util.zscore_mean import Stats
 from util.logging_color import _debug, _error, _info, _warn, _extra
 
 # ---------------------------- User Configurations --------------------------- #
@@ -19,7 +19,7 @@ POPULAR_SITES = 'popular_us_sites.csv'
 FREQUENT_SITES = 'frequent_sites.csv'
 
 # directory where all the data files are saved
-DATA_DIR = 'temp'
+DATA_DIR = 'collected_data'
 
 # -------------------------- Internal Configurations ------------------------- #
 
@@ -171,6 +171,9 @@ def main():
 def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: list[str],
                     frequent_sites_data_file: Path, frequent_sites_list: list[str]):
     
+    def __stats_str(heptate: Heptate, stats: Stats):
+        return f'Measured {round(getattr(heptate, RTT_COL), 2)}ms, Expected: {round(stats.mean, 2)}ms, STD: {round(stats.std, 2)}ms, Zscore: {round(stats.zscore, 3)}'
+    
     fail_fast: bool = args.fail_fast
     
     popular_sites_data_df = pd.read_csv(popular_sites_data_file,
@@ -184,14 +187,14 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     # 1. Check ISP gateway aliveness and RTT first. 
     #    Exit if we can't even access the gateway.
     gateway_ip = get_gateway_ip(popular_sites_data_df)
-    gateway_ping_ok, heptate_gateway = ping_url(gateway_ip)
+    gateway_ping_ok, gateway_heptate = ping_url(gateway_ip)
     if not gateway_ping_ok:
         print(_error('Not connected to gateway. Exiting...'))
         return
     # Check gateway rtt
-    zscore_gateway, mean_gateway = ip_filtered_rtt_zscore_mean(popular_sites_data_df, heptate_gateway)
-    if zscore_gateway >= BAD_ZSCORE:
-        print('❌', _warn(f'Gateway ({gateway_ip}) is experiencing unusually high {RTT_COL}. Expected: {mean_gateway}ms Measured: {getattr(heptate_gateway, RTT_COL)}'))
+    gateway_stats = ip_filtered_rtt_stats(popular_sites_data_df, gateway_heptate)
+    if gateway_stats.zscore >= BAD_ZSCORE:
+        print('❌', _warn(f'Gateway ({gateway_ip}) is experiencing unusually high {RTT_COL}. {__stats_str(gateway_heptate, gateway_stats)}'))
         if fail_fast:
             return
     else:
@@ -221,13 +224,13 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
             print(_extra(f'{site} in frequent sites'))
             df = frequent_sites_data_df
             
-        ok, heptate_site = ping_url(site)
+        ok, site_heptate = ping_url(site)
         if ok:
-            zscore, mean = ip_filtered_rtt_zscore_mean(df, heptate_site)
-            if zscore < BAD_ZSCORE:
+            site_stats = ip_filtered_rtt_stats(df, site_heptate)
+            if site_stats.zscore < BAD_ZSCORE:
                 print('✅', _info(f'Based on past data, RTT to {site} appears normal.'))
             else:
-                print('❌', _warn(f'Unusually high {RTT_COL} with {site} expected: {mean}ms measured: {getattr(heptate_site, RTT_COL)}ms'))
+                print('❌', _warn(f'Unusually high {RTT_COL} with {site}. {__stats_str(site_heptate, site_stats)}'))
                 if fail_fast: return
         else:
             print('❌', _error(f'Failed to ping {site} ...'))
@@ -266,9 +269,9 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
             # we compare the current RTT with past data. 
             # If zscore is high, we report this hop as the culprit. 
             # Otherwise continue the loop.
-            zscore, _ = ip_filtered_rtt_zscore_mean(df, heptate)
-            if zscore >= BAD_ZSCORE:
-                print('❌', _warn(f'Hop at {heptate.ip} is experiencing unusually high RTT.'))
+            heptate_stats = ip_filtered_rtt_stats(df, heptate)
+            if heptate_stats.zscore >= BAD_ZSCORE:
+                print('❌', _warn(f'Hop at {heptate.ip} is experiencing unusually high RTT. {__stats_str(heptate, heptate_stats)}'))
                 failure_detected = True
                 if fail_fast: return
                 num_problematic_hops += 1
@@ -435,7 +438,7 @@ def last_x_days_df(df: pd.DataFrame, days: int):
     x_days_ago_str = x_days_ago.strftime('%Y-%m-%d')
     return df[x_days_ago_str:]
 
-def ip_filtered_rtt_zscore_mean(df, heptate: Heptate, 
+def ip_filtered_rtt_stats(df, heptate: Heptate, 
                                 match_site=False, rtt_col=RTT_COL):
     mask = (df['ip'] == heptate.ip)
     if match_site:
@@ -448,8 +451,9 @@ def ip_filtered_rtt_zscore_mean(df, heptate: Heptate,
     rtt_series_quantile = rtt_series.quantile(0.9773)
     filterd_rtt_series = rtt_series[rtt_series < rtt_series_quantile]
     filterd_rtt_series_mean = filterd_rtt_series.mean()
-    zscore = (getattr(heptate, rtt_col) - filterd_rtt_series_mean) / filterd_rtt_series.std()
-    return ZscoreMean(zscore, filterd_rtt_series_mean)
+    filterd_rtt_series_std = filterd_rtt_series.std()
+    zscore = (getattr(heptate, rtt_col) - filterd_rtt_series_mean) / filterd_rtt_series_std
+    return Stats(zscore, filterd_rtt_series_mean, filterd_rtt_series_std)
 
 def extract_last_hops(df: pd.DataFrame) -> pd.DataFrame:
     # shift hop_num temp forward once
