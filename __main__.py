@@ -4,7 +4,6 @@ from pprint import pformat
 from socket import gaierror, gethostbyname_ex
 from time import perf_counter
 from textwrap import TextWrapper
-from typing import Text
 
 import numpy as np
 import pandas as pd
@@ -40,7 +39,7 @@ NUM_PINGS: int = 4
 REFERENCE_DAYS: int = 14
 
 # Z Score badness threshold
-BAD_ZSCORE: float = 1.0
+BAD_ZSCORE: float = 0.5
 
 # Should be one of min_rtt, avg_rtt, or max_rtt
 RTT_COL = 'avg_rtt'
@@ -251,7 +250,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     num_problematic_hops = 0
     failure_detected = False
     detachment_detected = False
-    for heptate in hops:
+    for heptate in hops[1:]: # skip gateway
         if heptate == dest:
             # successfully reached site, don't process last hop
             break
@@ -482,7 +481,6 @@ def site_max_rtt_stats(url: str, past_df: pd.DataFrame) -> tuple[float, float, f
     return max_rtt_stats(ping_data, past_df)
 
 
-# TODO: Make the return type a dataclass/namedtuple
 def max_rtt_stats(current: Heptate, past_df: pd.DataFrame) -> tuple[float, float, float]:
     '''Returns (zscore, current_max_rtt, mean_max_rtt_without_outliers).'''
     max_rtt_col = past_df['max_rtt']
