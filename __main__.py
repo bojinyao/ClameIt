@@ -19,7 +19,7 @@ POPULAR_SITES = 'popular_us_sites.csv'
 FREQUENT_SITES = 'frequent_sites.csv'
 
 # directory where all the data files are saved
-DATA_DIR = 'data'
+DATA_DIR = 'temp'
 
 # -------------------------- Internal Configurations ------------------------- #
 
@@ -177,6 +177,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                                         parse_dates=True,
                                         infer_datetime_format=True,
                                         index_col=DATA_COLUMNS[0])
+    popular_sites_data_df.sort_index(inplace=True)
     # Only referenced days are being used from here on
     popular_sites_data_df = last_x_days_df(popular_sites_data_df, REFERENCE_DAYS)
     
@@ -200,7 +201,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                                        parse_dates=True,
                                        infer_datetime_format=True,
                                        index_col=DATA_COLUMNS[0])
-    
+    frequent_sites_data_df.sort_index(inplace=True)
     frequent_sites_data_df = last_x_days_df(frequent_sites_data_df, REFERENCE_DAYS)
 
     site = args.site
@@ -214,10 +215,10 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
         print(_warn(f'No past data on {site} ...'))
     else:
         if site in popular_sites_list:
-            print(_info(f'{site} in popular sites'))
+            print(_extra(f'{site} in popular sites'))
             df = popular_sites_data_df
         else:
-            print(_info(f'{site} in frequent sites'))
+            print(_extra(f'{site} in frequent sites'))
             df = frequent_sites_data_df
             
         ok, heptate_site = ping_url(site)
@@ -225,12 +226,14 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
             zscore, mean = ip_filtered_rtt_zscore_mean(df, heptate_site)
             if zscore < BAD_ZSCORE:
                 print('✅', _info(f'Based on past data, RTT to {site} appears normal.'))
+            else:
+                print('❌', _warn(f'Unusually high {RTT_COL} with {site} expected: {mean}ms measured: {getattr(heptate_site, RTT_COL)}ms'))
                 if fail_fast: return
-            print('❌', _warn(f'Unusually high {RTT_COL} with {site} expected: {mean}ms measured: {getattr(heptate_site, RTT_COL)}ms'))
         else:
             print('❌', _error(f'Failed to ping {site} ...'))
+            if fail_fast: return
     
-    print(_info(f'Running traceroute on {site} ...'))
+    print(_extra(f'Running traceroute on {site} ...'))
     trace_ok, hops = trace_url(site)
     if trace_ok:
         dest = hops[-1]
