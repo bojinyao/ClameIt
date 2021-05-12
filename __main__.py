@@ -3,6 +3,8 @@ from pathlib import Path
 from pprint import pformat
 from socket import gaierror, gethostbyname_ex
 from time import perf_counter
+from textwrap import TextWrapper
+from typing import Text
 
 import numpy as np
 import pandas as pd
@@ -32,13 +34,15 @@ BAD_POPULAR_SITES_DATA = f'bad_{POPULAR_SITES_DATA}'
 BAD_FREQUENT_SITES_DATA = f'bad_{FREQUENT_SITES_DATA}'
 
 # Perform 4 pings per traceroute/ping for data collection
-NUM_PINGS = 4
+NUM_PINGS: int = 4
 
 # Use last 14 days (2 weeks) data as reference
-REFERENCE_DAYS = 14
+REFERENCE_DAYS: int = 14
 
-BAD_ZSCORE = 3.0
+# Z Score badness threshold
+BAD_ZSCORE: float = 1.0
 
+# Should be one of min_rtt, avg_rtt, or max_rtt
 RTT_COL = 'avg_rtt'
 
 """
@@ -52,7 +56,7 @@ avg_rtt (float): use `.avg_rtt` attribute when using icmplib
 max_rtt (float): use `.max_rtt` attribute when using icmplib
 """
 DATA_COLUMNS = HEPTATE_ENTRIES  # ['time', 'site', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
-
+assert RTT_COL in DATA_COLUMNS, f'Unrecognized RTT COL: {RTT_COL}'
 
 def main():
     # ######################################################## #
@@ -152,8 +156,8 @@ def main():
     parser_analyze = subparser.add_parser('analyze')
     # at least 1 site should be supplied for analysis
     parser_analyze.add_argument('site')
-    parser_analyze.add_argument('--fail-fast', default=False, action='store_true', dest='fail_fast',
-                                help='stop when first problem is found')
+    parser_analyze.add_argument('--fast-run', default=False, action='store_true', dest='fast_run',
+                                help='stop if everything is normal or when first problem is found')
     parser_analyze.set_defaults(func=lambda args: _handle_analyze(args,
                                                                   popular_sites_data_file,
                                                                   popular_sites_list,
@@ -174,7 +178,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     def __stats_str(heptate: Heptate, stats: Stats):
         return f'Measured {round(getattr(heptate, RTT_COL), 2)}ms, Expected: {round(stats.mean, 2)}ms, STD: {round(stats.std, 2)}ms, Zscore: {round(stats.zscore, 3)}'
     
-    fail_fast: bool = args.fail_fast
+    fast_run: bool = args.fast_run
     
     popular_sites_data_df = pd.read_csv(popular_sites_data_file,
                                         parse_dates=True,
@@ -195,8 +199,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     gateway_stats = ip_filtered_rtt_stats(popular_sites_data_df, gateway_heptate)
     if gateway_stats.zscore >= BAD_ZSCORE:
         print('❌', _warn(f'Gateway ({gateway_ip}) is experiencing unusually high {RTT_COL}. {__stats_str(gateway_heptate, gateway_stats)}'))
-        if fail_fast:
-            return
+        if fast_run: return
     else:
         print('✅', _info(f'Gateway ({gateway_ip}) okay'))
     
@@ -229,12 +232,11 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
             site_stats = ip_filtered_rtt_stats(df, site_heptate)
             if site_stats.zscore < BAD_ZSCORE:
                 print('✅', _info(f'Based on past data, RTT to {site} appears normal.'))
+                if fast_run: return
             else:
                 print('❌', _warn(f'Unusually high {RTT_COL} with {site}. {__stats_str(site_heptate, site_stats)}'))
-                if fail_fast: return
         else:
             print('❌', _error(f'Failed to ping {site} ...'))
-            if fail_fast: return
     
     print(_extra(f'Running traceroute on {site} ...'))
     trace_ok, hops = trace_url(site)
@@ -258,11 +260,12 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
         if cur_ip_df.shape[0] > 0:
             if is_detached: # reaching a site does not count as getting back to old path
                 is_detached = False
-                print('❕', _warn(f'After {last_known_hop.ip} rerouted through {[h.ip for h in unknown_hops]} to reach {heptate.ip}.'))
+                print(_info(f'Back to known hop: {heptate.ip}'))
                 # we get back to a known hop/path
                 if not num_problematic_hops:
+                    print('❕', _warn(f'After {last_known_hop.ip} rerouted through {[h.ip for h in unknown_hops]} to reach {heptate.ip}.'))
                     failure_detected = True
-                    if fail_fast: return
+                    if fast_run: return
                     unknown_hops = [] # clear unknown list
                     num_problematic_hops = 0
             # If the IP of the hop is in historical data, 
@@ -273,7 +276,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
             if heptate_stats.zscore >= BAD_ZSCORE:
                 print('❌', _warn(f'Hop at {heptate.ip} is experiencing unusually high RTT. {__stats_str(heptate, heptate_stats)}'))
                 failure_detected = True
-                if fail_fast: return
+                if fast_run: return
                 num_problematic_hops += 1
             else:
                 print('✅', _info(f'{heptate.ip} appears normal'))
@@ -281,54 +284,51 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
         else:
             # If the IP of the hop is NOT in historical data, 
             # we skip this hop and continue the loop.
-            print(_debug(f'Unknown hop: {heptate.ip}'))
+            print(_warn(f'Unknown hop: {heptate.ip}'))
             unknown_hops.append(heptate)
             is_detached = True
             detachment_detected = True
             continue
 
+    detachment_str = ''
+    if detachment_detected:
+        if is_detached:
+            detachment_str = 'Some middle AS(es) might be experiencing problems.'
+        else:
+            detachment_str = 'Network instability detected.'
+    
+    failure_str = 'No failure detected.'
+    if failure_detected:
+        failure_str = 'Possible failures shown above.'
+
+    msg = f'{failure_str} {detachment_str}'
+
     if trace_ok:
-        print(_extra(f'Reached {site} min_rtt: {dest.min_rtt}, avg_rtt: {dest.avg_rtt}, max_rtt: {dest.max_rtt}'))
+        print(_extra(f'Reached {site} {dest.rtt_str()}'))
         # Site reachable
         if is_new_site:
-            if is_detached and failure_detected:
-                print(_extra(f'Possible failures shown above, there might be additional failure(s).'))
-            if is_detached and not failure_detected:
-                print(_extra(f'No possible failure detected, not enough information. {site} might be doing okay.'))
-            if not is_detached and not failure_detected:
-                print(_extra(f'No possible failure detected, {site} likely doing okay.'))
-            if not is_detached and failure_detected:
-                print(_extra(f'Possible failures shown above.'))
+            if not failure_detected:
+                msg += f' {site} likely doing okay.'
         else:
-            if not is_detached and not failure_detected:
-                print(_extra(f'{site} appears normal'))
-            if not is_detached and failure_detected:
-                print(_extra(f'Possible failures are shown above.'))
-            if is_detached and not failure_detected:
-                print(_extra(f'Network unstable, no known failure detected.'))
-            if is_detached and failure_detected:
-                print(_extra(f'Possible failures are shown above. Network unstable.'))
+            if not failure_detected:
+                msg += f' {site} appears normal'
     else:
-        print(_error('❌', f'Failed to reach {site}'))
-        # Site unreachable
+        print('❌', _error(f'Failed to reach {site}'))
+        # Site not reachable
         if is_new_site:
-            if is_detached and failure_detected:
-                print(_extra(f'Possible failures shown above, there might be additional failure(s).'))
-            if is_detached and not failure_detected:
-                print(_extra(f'No possible failure detected, not enough information. Some middle AS(es) might be experiencing problems.'))
-            if not is_detached and failure_detected:
-                print(_extra(f'Possible failures shown above.'))
-            if not is_detached and not failure_detected:
-                print(_extra(f'No possible failure detected. Problem unknown.'))
+            if detachment_detected and failure_detected:
+                msg += f' There might be additional failure(s).'
+            if detachment_detected and not failure_detected:
+                msg += f' Not enough information.'
+            if not detachment_detected and not failure_detected:
+                msg += f' Problem unknown.'
         else:
-            if is_detached and not failure_detected:
-                print(_extra(f'Network unstable, no known failure detected. Some middle AS(es) might be experiencing problems.'))
-            if is_detached and failure_detected:
-                print(_extra(f'Possible failures are shown above. Network unstable.'))
-            if not is_detached and not failure_detected:
-                print(_extra(f'Problem unknown. {site} could be down.'))
-            if not is_detached and failure_detected:
-                print(_extra(f'Possible failures are shown above.'))
+            if not detachment_detected and not failure_detected:
+                msg += f' Problem unknown.'
+        msg += f' {site} could be down or not responding to ICMP packets.'
+
+    wrapper = TextWrapper(width=70)
+    print(wrapper.fill(_extra(msg)))
 
 def _handle_traceroute(args, sites_data_file: Path, sites_bad_data_file: Path):
     _collect_data(sites_data_file, sites_bad_data_file, args.sites)
@@ -402,7 +402,7 @@ def trace_url(address: str, num_pings=NUM_PINGS):
         # traceroute might've timed out or DNS is out of date
         # regardless, something is wrong
         print(
-            _warn(f'{address} ip mismatch: {hops[-1].address} not one of {possible_ips}'))
+            _warn(f'Traceroute failure {address} ip mismatch: {hops[-1].address} not one of {possible_ips}'))
         ok = False
     return ok, [Heptate(__utc_time_now(),
                     address,
@@ -419,7 +419,7 @@ def ping_url(address: str, num_pings=NUM_PINGS) -> tuple[bool, Heptate]:
     if not host.is_alive:
         # Failed to reach address
         print(
-            _warn(f'{address} not reachable'))
+            _warn(f'Ping failure: {address} not reachable'))
     return host.is_alive, Heptate(t,
                    address,
                    host.address,
@@ -432,18 +432,23 @@ def __utc_time_now():
     return pd.to_datetime('now', utc=True)
 
 def last_x_days_df(df: pd.DataFrame, days: int):
-    assert days >= 0, f'days: {days} must be positive integer'
+    assert df.shape[0] > 0, 'In last_x_days_df: passed in Dataframe is empty'
+    assert days >= 0, f'days: {days} must be non-negative integer'
     now = __utc_time_now()
     x_days_ago = now - days * pd.offsets.Day()
     x_days_ago_str = x_days_ago.strftime('%Y-%m-%d')
-    return df[x_days_ago_str:]
+    res = df[x_days_ago_str:]
+    assert res.shape[0] > 0, f'In last_x_days_df: last {days} returns empty Dataframe'
+    return res
 
 def ip_filtered_rtt_stats(df, heptate: Heptate, 
                                 match_site=False, rtt_col=RTT_COL):
+    assert df.shape[0] > 0, 'In ip_filtered_rtt_stats: passed in Dataframe is empty'
     mask = (df['ip'] == heptate.ip)
     if match_site:
         mask = mask & (df['site'] == heptate.site)
     target_df = df[mask]
+    assert target_df.shape[0] > 0, 'Dataframe is empty after filter'
     rtt_series = target_df[rtt_col]
     
     # remove rtt over 97.73 percentile (outliers over 3-std)
@@ -456,6 +461,7 @@ def ip_filtered_rtt_stats(df, heptate: Heptate,
     return Stats(zscore, filterd_rtt_series_mean, filterd_rtt_series_std)
 
 def extract_last_hops(df: pd.DataFrame) -> pd.DataFrame:
+    assert df.shape[0] > 0, 'In extract_last_hops: passed in Dataframe is empty'
     # shift hop_num temp forward once
     df['hop_num_temp'] = df['hop_num'].shift(-1)
     # last hop_num of temp would be N/A, so hardcode it to 1
@@ -465,6 +471,7 @@ def extract_last_hops(df: pd.DataFrame) -> pd.DataFrame:
     return res_df
 
 def get_gateway_ip(df: pd.DataFrame):
+    assert df.shape[0] > 0, 'In get_gateway_ip: passed in Dataframe is empty'
     hop_one = df[df['hop_num'] == 1]
     hop_one_ip_col = hop_one['ip']
     return hop_one_ip_col.iloc[-1]
@@ -491,74 +498,3 @@ def max_rtt_stats(current: Heptate, past_df: pd.DataFrame) -> tuple[float, float
 """
 if __name__ == '__main__':
     main()
-
-'''
-# Find last hops for each popular sites, which we use to compare max RTTs against
-    popular_sites_data_df = extract_last_hops(popular_sites_data_df)
-
-    print(_info('Checking popular hosts...'))
-    any_success = False
-    for popular_site in popular_sites_list:
-        site_df = popular_sites_data_df[popular_sites_data_df['site'] == popular_site]
-        try:
-            zscore, curr_max_rtt, mean_max_rtt = site_max_rtt_stats(popular_site,
-                                                                    site_df)
-        except gaierror:
-            continue
-
-        if zscore < 3:
-            any_success = True
-            print(_info(f'{popular_site} appears normal'))
-        else:
-            print(_error(f'{popular_site} appears problematic '
-                         f'(max RTT: {curr_max_rtt}, '
-                         f'avg. past max RTT: {mean_max_rtt})'))
-
-    # If we’re experiencing problems with all popular hosts, we conclude that it's a
-    # problem with our ISP.
-    if not any_success:
-        print()
-        print(_error('All popular sites appear problematic, either having abnormally '
-                     'high RTT or unreachable. This like indicates a gateway router or '
-                     ' ISP problem.'))
-        return
-
-    # If we’re experiencing problems with some, but not all popular hosts, we conclude
-    # that it’s a problem with intermediate AS(es), and we can run traceroute on our
-    # host of interest to get a finer granularity of information.
-
-    # First get all the hops between this device and the host of interest
-    print()
-    print(_info('Checking host of interest...'))
-    ok, hops = trace_url(site)
-    culprit = None
-    for hop in hops:
-        # Skip this hop if we've never seen it before
-        if hop.ip not in frequent_sites_data_df['ip'].values:
-            print(_warn(f'Hop #{hop.hop_num} ({hop.ip}) is not in historical data'))
-            continue
-
-        ip_df = frequent_sites_data_df[frequent_sites_data_df['ip'] == hop.ip]
-        zscore, curr_max_rtt, mean_max_rtt = max_rtt_stats(hop, ip_df)
-        if zscore < 3:
-            print(_info(f'Hop #{hop.hop_num} ({hop.ip}) appears normal'))
-        else:
-            print(_error(f'Hop #{hop.hop_num} ({hop.ip}) appears problematic '
-                         f'(max RTT: {curr_max_rtt}, '
-                         f'avg. past max RTT: {mean_max_rtt}); '
-                         'this could be the culprit.'))
-
-            # Remember the first problematic hop
-            if culprit is None:
-                culprit = hop
-
-    print()
-    if culprit is not None:
-        print(_error(f'Hop #{culprit.hop_num} ({culprit.ip}) on the path from this '
-                     f'device to {site} was the first one that appeared problematic '
-                     '(having an abnormally high RTT). This is likely the culprit of '
-                     'your connection problem.'))
-    else:
-        print(_info('No connection problem detected. Everything seems to be working.'))
-
-'''

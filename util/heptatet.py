@@ -23,3 +23,6 @@ class Heptate(NamedTuple):
     min_rtt: float
     avg_rtt: float
     max_rtt: float
+
+    def rtt_str(self):
+        return f'min_rtt: {round(self.min_rtt, 2)}ms, avg_rtt: {round(self.avg_rtt, 2)}ms, max_rtt: {round(self.max_rtt, 2)}ms'
