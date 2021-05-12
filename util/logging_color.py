@@ -6,6 +6,9 @@ def _info(s: str) -> str:
 def _warn(s: str) -> str:
     return colored(s, 'yellow')
 
+def _extra(s: str) -> str:
+    return colored(s, 'magenta')
+
 def _error(s: str) -> str:
     return colored(s, 'red')
 

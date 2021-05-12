@@ -1,4 +1,5 @@
-from collections import namedtuple
+from typing import NamedTuple
+from pandas import DatetimeIndex
 
 """
 Heptatets (derivative, I know)
@@ -12,4 +13,13 @@ max_rtt (float): use `.max_rtt` attribute when using icmplib
 """
 HEPTATE_ENTRIES = ['time', 'site', 'ip', 'hop_num', 'min_rtt', 'avg_rtt', 'max_rtt']
 
-Heptate = namedtuple('Heptatet', HEPTATE_ENTRIES)
+# Heptate = namedtuple('Heptatet', HEPTATE_ENTRIES)
+
+class Heptate(NamedTuple):
+    time: DatetimeIndex
+    site: str
+    ip: str
+    hop_num: int
+    min_rtt: float
+    avg_rtt: float
+    max_rtt: float
