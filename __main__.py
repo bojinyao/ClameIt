@@ -39,7 +39,7 @@ NUM_PINGS: int = 4
 REFERENCE_DAYS: int = 14
 
 # Z Score badness threshold
-BAD_ZSCORE: float = 0.5
+BAD_ZSCORE: float = 2.0
 
 # Should be one of min_rtt, avg_rtt, or max_rtt
 RTT_COL = 'avg_rtt'
@@ -187,6 +187,8 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     # Only referenced days are being used from here on
     popular_sites_data_df = last_x_days_df(popular_sites_data_df, REFERENCE_DAYS)
     
+    failure_detected = False
+    
     # 1. Check ISP gateway aliveness and RTT first. 
     #    Exit if we can't even access the gateway.
     gateway_ip = get_gateway_ip(popular_sites_data_df)
@@ -198,6 +200,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     gateway_stats = ip_filtered_rtt_stats(popular_sites_data_df, gateway_heptate)
     if gateway_stats.zscore >= BAD_ZSCORE:
         print('❌', _warn(f'Gateway ({gateway_ip}) is experiencing unusually high {RTT_COL}. {__stats_str(gateway_heptate, gateway_stats)}'))
+        failure_detected = True
         if fast_run: return
     else:
         print('✅', _info(f'Gateway ({gateway_ip}) okay'))
@@ -234,8 +237,10 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
                 if fast_run: return
             else:
                 print('❌', _warn(f'Unusually high {RTT_COL} with {site}. {__stats_str(site_heptate, site_stats)}'))
+                failure_detected = True
         else:
             print('❌', _error(f'Failed to ping {site} ...'))
+            failure_detected = True
     
     print(_extra(f'Running traceroute on {site} ...'))
     trace_ok, hops = trace_url(site)
@@ -248,7 +253,7 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
     unknown_hops: list[Heptate] = []
     is_detached = False
     num_problematic_hops = 0
-    failure_detected = False
+    
     detachment_detected = False
     for heptate in hops[1:]: # skip gateway
         if heptate == dest:
@@ -296,9 +301,9 @@ def _handle_analyze(args, popular_sites_data_file: Path, popular_sites_list: lis
         else:
             detachment_str = 'Network instability detected.'
     
-    failure_str = 'No failure detected.'
+    failure_str = 'No problem detected.'
     if failure_detected:
-        failure_str = 'Possible failures shown above.'
+        failure_str = 'Possible problems shown above.'
 
     msg = f'{failure_str} {detachment_str}'
 
